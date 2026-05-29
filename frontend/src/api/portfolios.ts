@@ -49,6 +49,10 @@ export function runPortfolio(id: number) {
   return unwrap(http.post<{ task_id: string; status: string }>(`/portfolios/${id}/run`))
 }
 
+export function deletePortfolio(id: number) {
+  return unwrap(http.delete<{ message: string }>(`/portfolios/${id}`))
+}
+
 export function getPortfolioSummary(id: number) {
   return unwrap(http.get<Record<string, unknown>>(`/portfolios/${id}/summary`))
 }

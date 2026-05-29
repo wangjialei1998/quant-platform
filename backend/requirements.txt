@@ -9,4 +9,6 @@ redis==5.2.1
 python-multipart==0.0.20
 httpx==0.28.1
 backtrader==1.9.78.123
-
+pandas==2.2.3
+docker==7.1.0
+tickflow[all]

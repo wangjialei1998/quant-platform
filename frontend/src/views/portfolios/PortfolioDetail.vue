@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Refresh } from '@element-plus/icons-vue'
+import { ArrowLeft, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { EChartsOption } from 'echarts'
 import {
   getCashFlows,
@@ -21,6 +21,7 @@ import TaskStatus from '@/components/common/TaskStatus.vue'
 import MetricCards from '@/components/portfolio/MetricCards.vue'
 
 const route = useRoute()
+const router = useRouter()
 const portfolioId = Number(route.params.id)
 const portfolio = ref<Portfolio>()
 const summary = ref<Record<string, unknown>>()
@@ -117,8 +118,10 @@ onMounted(load)
     <div class="page-header">
       <h1 class="page-title">{{ portfolio?.name ?? '组合详情' }}</h1>
       <div class="toolbar">
+        <el-button :icon="ArrowLeft" @click="router.push('/portfolios')">返回</el-button>
         <span class="muted">邮件提醒</span>
         <el-switch v-model="emailEnabled" @change="toggleEmail" />
+        <el-button :icon="TrendCharts" @click="router.push(`/portfolios/${portfolioId}/signals`)">信号洞察</el-button>
         <el-button type="primary" :icon="Refresh" @click="run">手动更新</el-button>
       </div>
     </div>

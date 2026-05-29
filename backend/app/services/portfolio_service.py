@@ -1,10 +1,19 @@
 from decimal import Decimal
 
+from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.backtest import BacktestRun
+from app.models.chart import ChartSnapshot
+from app.models.log import SystemLog
+from app.models.metric import PortfolioMetric
+from app.models.notification import Notification
 from app.models.portfolio import Portfolio, PortfolioInstrument
+from app.models.portfolio import PortfolioPosition
+from app.models.signal import Signal
 from app.models.strategy import Strategy
+from app.models.trade import CashFlow, Trade
 from app.schemas.portfolio import PortfolioCreate
 from app.utils.errors import NotFoundError, ValidationError
 
@@ -48,3 +57,25 @@ class PortfolioService:
         self.db.commit()
         self.db.refresh(portfolio)
         return portfolio
+
+    def delete(self, portfolio_id: int) -> None:
+        portfolio = self.db.get(Portfolio, portfolio_id)
+        if not portfolio:
+            raise NotFoundError("Portfolio not found")
+
+        for model in (
+            ChartSnapshot,
+            Notification,
+            SystemLog,
+            PortfolioMetric,
+            PortfolioPosition,
+            CashFlow,
+            Trade,
+            Signal,
+            BacktestRun,
+            PortfolioInstrument,
+        ):
+            self.db.execute(delete(model).where(model.portfolio_id == portfolio_id))
+
+        self.db.delete(portfolio)
+        self.db.commit()

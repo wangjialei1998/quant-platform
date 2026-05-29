@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { reactive } from 'vue'
 import { useRouter } from 'vue-router'
@@ -28,7 +29,10 @@ async function submit() {
   <section class="page">
     <div class="page-header">
       <h1 class="page-title">新增策略</h1>
-      <el-button type="primary" @click="submit">保存策略</el-button>
+      <div class="toolbar">
+        <el-button :icon="ArrowLeft" @click="router.push('/strategies')">返回</el-button>
+        <el-button type="primary" @click="submit">保存策略</el-button>
+      </div>
     </div>
     <el-card shadow="never">
       <el-form label-width="96px">
@@ -51,4 +55,3 @@ async function submit() {
   font-family: "Cascadia Code", Consolas, monospace;
 }
 </style>
-

@@ -41,11 +41,10 @@ def get_portfolio(portfolio_id: int, db: Session = Depends(get_db)) -> Portfolio
 
 @router.delete("/{portfolio_id}", response_model=MessageResponse)
 def delete_portfolio(portfolio_id: int, db: Session = Depends(get_db)) -> MessageResponse:
-    portfolio = db.get(Portfolio, portfolio_id)
-    if not portfolio:
-        raise HTTPException(status_code=404, detail="Portfolio not found")
-    portfolio.status = "deleted"
-    db.commit()
+    try:
+        PortfolioService(db).delete(portfolio_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     return MessageResponse()
 
 

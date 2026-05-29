@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { Plus, Refresh, VideoPlay } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { Delete, Plus, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { listPortfolios, pausePortfolio, resumePortfolio, runPortfolio, type Portfolio } from '@/api/portfolios'
+import {
+  deletePortfolio,
+  listPortfolios,
+  pausePortfolio,
+  resumePortfolio,
+  runPortfolio,
+  type Portfolio,
+} from '@/api/portfolios'
 import TaskStatus from '@/components/common/TaskStatus.vue'
 
 const router = useRouter()
@@ -35,6 +42,15 @@ async function toggle(row: Portfolio) {
   await load()
 }
 
+async function remove(row: Portfolio) {
+  await ElMessageBox.confirm(`删除组合“${row.name}”及其回测、交易、持仓、资金流水、信号和日志数据？`, '确认删除', {
+    type: 'warning',
+  })
+  await deletePortfolio(row.id)
+  ElMessage.success('组合已删除')
+  await load()
+}
+
 onMounted(load)
 </script>
 
@@ -55,16 +71,16 @@ onMounted(load)
         <el-table-column prop="start_date" label="起始日期" width="130" />
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="last_run_at" label="最近运行" width="190" />
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button text @click="router.push(`/portfolios/${row.id}`)">详情</el-button>
             <el-button text @click="router.push(`/portfolios/${row.id}/signals`)">信号洞察</el-button>
             <el-button :icon="VideoPlay" text @click="run(row)">更新</el-button>
             <el-button text @click="toggle(row)">{{ row.status === 'paused' ? '恢复' : '暂停' }}</el-button>
+            <el-button :icon="Delete" text type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
   </section>
 </template>
-

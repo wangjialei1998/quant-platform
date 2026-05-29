@@ -1,10 +1,11 @@
 <script setup lang="ts">
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { listStrategies, type Strategy } from '@/api/strategies'
-import { createPortfolio } from '@/api/portfolios'
 import { createInstrument } from '@/api/instruments'
+import { createPortfolio } from '@/api/portfolios'
+import { listStrategies, type Strategy } from '@/api/strategies'
 import InstrumentSelector from '@/components/common/InstrumentSelector.vue'
 import TaskStatus from '@/components/common/TaskStatus.vue'
 
@@ -38,27 +39,13 @@ async function submit() {
 async function addInstrument() {
   const symbol = instrumentForm.symbol.trim()
   if (!symbol) return
-  const instrument = await createInstrument({
-    symbol,
-    name: symbol,
-    instrument_type: inferInstrumentType(symbol),
-    exchange: inferExchange(symbol),
-    is_active: true,
-  })
+  const instrument = await createInstrument({ symbol })
   if (!form.instrument_ids.includes(instrument.id)) {
     form.instrument_ids.push(instrument.id)
   }
   selectorKey.value += 1
   instrumentForm.symbol = ''
   ElMessage.success('标的已添加')
-}
-
-function inferExchange(symbol: string) {
-  return symbol.startsWith('6') || symbol.startsWith('5') ? 'SSE' : 'SZSE'
-}
-
-function inferInstrumentType(symbol: string): 'stock' | 'etf' {
-  return symbol.startsWith('5') || symbol.startsWith('1') ? 'etf' : 'stock'
 }
 
 onMounted(async () => {
@@ -70,7 +57,10 @@ onMounted(async () => {
   <section class="page">
     <div class="page-header">
       <h1 class="page-title">创建组合</h1>
-      <el-button type="primary" @click="submit">创建并回测</el-button>
+      <div class="toolbar">
+        <el-button :icon="ArrowLeft" @click="router.push('/portfolios')">返回</el-button>
+        <el-button type="primary" @click="submit">创建并回测</el-button>
+      </div>
     </div>
     <TaskStatus :task-id="taskId" />
     <el-card shadow="never">

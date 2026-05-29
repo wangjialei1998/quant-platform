@@ -1,5 +1,4 @@
-FROM node:22-alpine
-# FROM docker.io/node:22-alpine
+FROM docker.1ms.run/library/node:22-alpine
 WORKDIR /app
 
 COPY package.json ./

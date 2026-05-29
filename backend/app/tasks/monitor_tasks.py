@@ -1,6 +1,7 @@
 from app.core.database import SessionLocal
 from app.models.portfolio import Portfolio
-from app.services.demo_backtest_service import DemoBacktestService
+from app.services.backtest_execution_service import BacktestExecutionService
+from app.tasks.chart_tasks import build_chart_snapshots
 from app.tasks.celery_app import celery_app
 
 
@@ -19,8 +20,10 @@ def monitor_all_portfolios() -> dict:
 def monitor_portfolio(portfolio_id: int, run_type: str = "manual_monitor") -> dict:
     db = SessionLocal()
     try:
-        result = DemoBacktestService(db).initialize_portfolio(portfolio_id)
+        result = BacktestExecutionService(db).initialize_portfolio(portfolio_id, run_type)
         result["run_type"] = run_type
+        if result.get("status") == "success":
+            build_chart_snapshots.delay(portfolio_id)
         return result
     finally:
         db.close()
