@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { VideoPlay } from '@element-plus/icons-vue'
+import { ArrowLeft, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { onMounted, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getStrategy, testStrategy, type Strategy } from '@/api/strategies'
 import TaskStatus from '@/components/common/TaskStatus.vue'
 
 const route = useRoute()
+const router = useRouter()
 const strategy = ref<Strategy>()
 const taskId = ref('')
 
@@ -27,8 +28,13 @@ onMounted(load)
 <template>
   <section class="page">
     <div class="page-header">
-      <h1 class="page-title">{{ strategy?.name ?? '策略详情' }}</h1>
-      <el-button type="primary" :icon="VideoPlay" @click="submitTest">运行测试</el-button>
+      <div class="toolbar">
+        <el-button :icon="ArrowLeft" @click="router.push('/strategies')">返回策略列表</el-button>
+        <h1 class="page-title">{{ strategy?.name ?? '策略详情' }}</h1>
+      </div>
+      <div class="toolbar">
+        <el-button type="primary" :icon="VideoPlay" @click="submitTest">运行测试</el-button>
+      </div>
     </div>
     <TaskStatus :task-id="taskId" />
     <el-descriptions v-if="strategy" :column="2" border>

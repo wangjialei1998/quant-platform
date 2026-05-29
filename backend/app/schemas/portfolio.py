@@ -34,6 +34,16 @@ class PortfolioRead(OrmModel):
     updated_at: datetime
 
 
+class PortfolioListItem(PortfolioRead):
+    strategy_name: str | None = None
+    instrument_count: int = 0
+    latest_net_value: float = 1.0
+    current_total_asset: Decimal
+    total_return: float = 0.0
+    max_drawdown: float = 0.0
+    latest_metric_date: date | None = None
+
+
 class PortfolioSummary(OrmModel):
     id: int
     name: str

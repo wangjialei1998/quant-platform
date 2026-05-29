@@ -79,6 +79,11 @@ class TickFlowClient:
 def normalize_symbol(symbol: str) -> str:
     cleaned = symbol.strip().upper()
     if "." in cleaned:
+        code, suffix = cleaned.split(".", 1)
+        if suffix == "SSE":
+            return f"{code}.SH"
+        if suffix == "SZSE":
+            return f"{code}.SZ"
         return cleaned
     if cleaned.startswith(("5", "6", "9")):
         return f"{cleaned}.SH"
@@ -87,7 +92,8 @@ def normalize_symbol(symbol: str) -> str:
 
 def infer_exchange(symbol: str) -> str:
     normalized = normalize_symbol(symbol)
-    return normalized.split(".", 1)[1]
+    suffix = normalized.split(".", 1)[1]
+    return {"SH": "SSE", "SZ": "SZSE"}.get(suffix, suffix)
 
 
 def infer_instrument_type(symbol: str) -> str:

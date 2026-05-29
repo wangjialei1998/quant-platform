@@ -18,6 +18,14 @@ const loading = ref(false)
 const portfolios = ref<Portfolio[]>([])
 const taskId = ref('')
 
+function money(value: unknown) {
+  return Number(value ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+function percent(value: unknown) {
+  return `${(Number(value ?? 0) * 100).toFixed(2)}%`
+}
+
 async function load() {
   loading.value = true
   try {
@@ -67,9 +75,26 @@ onMounted(load)
     <el-card shadow="never">
       <el-table v-loading="loading" :data="portfolios">
         <el-table-column prop="name" label="组合名称" min-width="160" />
-        <el-table-column prop="initial_cash" label="初始资金" width="130" />
+        <el-table-column prop="strategy_name" label="策略" min-width="140" />
+        <el-table-column prop="instrument_count" label="标的数" width="90" />
+        <el-table-column label="初始资金" width="130">
+          <template #default="{ row }">{{ money(row.initial_cash) }}</template>
+        </el-table-column>
+        <el-table-column label="当前总资产" width="140">
+          <template #default="{ row }">{{ money(row.current_total_asset) }}</template>
+        </el-table-column>
+        <el-table-column label="最新净值" width="110">
+          <template #default="{ row }">{{ Number(row.latest_net_value ?? 1).toFixed(4) }}</template>
+        </el-table-column>
+        <el-table-column label="当前收益率" width="120">
+          <template #default="{ row }">{{ percent(row.total_return) }}</template>
+        </el-table-column>
+        <el-table-column label="最大回撤" width="110">
+          <template #default="{ row }">{{ percent(row.max_drawdown) }}</template>
+        </el-table-column>
         <el-table-column prop="start_date" label="起始日期" width="130" />
         <el-table-column prop="status" label="状态" width="120" />
+        <el-table-column prop="latest_metric_date" label="最新指标日" width="130" />
         <el-table-column prop="last_run_at" label="最近运行" width="190" />
         <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">

@@ -19,6 +19,9 @@ const form = reactive({
   initial_cash: '1000000',
   start_date: '',
   email_enabled: true,
+  commission_rate: '',
+  stamp_tax_rate: '',
+  slippage_rate: '',
 })
 const instrumentForm = reactive({
   symbol: '',
@@ -28,8 +31,15 @@ const selectorKey = ref(0)
 async function submit() {
   if (!form.strategy_id) return
   const response = await createPortfolio({
-    ...form,
+    name: form.name,
     strategy_id: form.strategy_id,
+    instrument_ids: form.instrument_ids,
+    initial_cash: form.initial_cash,
+    start_date: form.start_date,
+    email_enabled: form.email_enabled,
+    commission_rate: form.commission_rate || undefined,
+    stamp_tax_rate: form.stamp_tax_rate || undefined,
+    slippage_rate: form.slippage_rate || undefined,
   })
   taskId.value = response.task_id
   ElMessage.success('组合创建任务已提交')
@@ -91,6 +101,13 @@ onMounted(async () => {
         <el-form-item label="邮件提醒">
           <el-switch v-model="form.email_enabled" />
         </el-form-item>
+        <el-form-item label="交易参数">
+          <div class="fee-grid">
+            <el-input v-model="form.commission_rate" placeholder="佣金率，默认 0.0003" />
+            <el-input v-model="form.stamp_tax_rate" placeholder="印花税率，默认 0.001" />
+            <el-input v-model="form.slippage_rate" placeholder="滑点率，默认 0.0002" />
+          </div>
+        </el-form-item>
       </el-form>
     </el-card>
   </section>
@@ -101,6 +118,13 @@ onMounted(async () => {
   display: grid;
   width: 100%;
   grid-template-columns: minmax(180px, 320px) auto;
+  gap: 8px;
+}
+
+.fee-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 8px;
 }
 </style>

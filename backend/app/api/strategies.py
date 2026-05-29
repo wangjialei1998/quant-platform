@@ -20,7 +20,9 @@ def list_strategies(db: Session = Depends(get_db)) -> list[Strategy]:
 
 @router.post("", response_model=StrategyRead)
 def create_strategy(payload: StrategyCreate, db: Session = Depends(get_db)) -> Strategy:
-    return StrategyService(db).create(payload)
+    strategy = StrategyService(db).create(payload)
+    test_strategy.delay(strategy.id)
+    return strategy
 
 
 @router.post("/upload", response_model=StrategyRead)
@@ -55,7 +57,10 @@ def _read_strategy_code(code_path: str) -> str:
 @router.patch("/{strategy_id}", response_model=StrategyRead)
 def update_strategy(strategy_id: int, payload: StrategyUpdate, db: Session = Depends(get_db)) -> Strategy:
     try:
-        return StrategyService(db).update(strategy_id, payload)
+        strategy = StrategyService(db).update(strategy_id, payload)
+        if payload.code is not None:
+            test_strategy.delay(strategy.id)
+        return strategy
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

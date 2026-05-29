@@ -14,6 +14,13 @@ export interface Portfolio {
   last_run_at?: string
   created_at: string
   updated_at: string
+  strategy_name?: string
+  instrument_count?: number
+  latest_net_value?: number
+  current_total_asset?: string
+  total_return?: number
+  max_drawdown?: number
+  latest_metric_date?: string
 }
 
 export interface PortfolioCreate {
@@ -23,6 +30,9 @@ export interface PortfolioCreate {
   initial_cash: string
   start_date: string
   email_enabled: boolean
+  commission_rate?: string
+  stamp_tax_rate?: string
+  slippage_rate?: string
 }
 
 export function listPortfolios() {
@@ -75,8 +85,12 @@ export interface DrawdownPayload {
   drawdown: number[]
 }
 
-export function getEquityCurve(id: number) {
-  return unwrap(http.get<EquityCurvePayload>(`/portfolios/${id}/equity-curve`))
+export function getEquityCurve(id: number, benchmarkSymbol?: string) {
+  return unwrap(
+    http.get<EquityCurvePayload>(`/portfolios/${id}/equity-curve`, {
+      params: benchmarkSymbol ? { benchmark_symbol: benchmarkSymbol } : undefined,
+    }),
+  )
 }
 
 export function getDrawdown(id: number) {
@@ -93,4 +107,21 @@ export function getPositions(id: number) {
 
 export function getCashFlows(id: number) {
   return unwrap(http.get<[]>(`/portfolios/${id}/cash-flows`))
+}
+
+export function getPortfolioPerformance(id: number) {
+  return unwrap(
+    http.get<{
+      monthly: { period: string; start_net_value: number; end_net_value: number; return: number }[]
+      yearly: { period: string; start_net_value: number; end_net_value: number; return: number }[]
+    }>(`/portfolios/${id}/performance`),
+  )
+}
+
+export function getPositionValues(id: number) {
+  return unwrap(http.get<{ dates: string[]; series: { name: string; data: number[] }[] }>(`/portfolios/${id}/position-values`))
+}
+
+export function getReturnContribution(id: number, period: 'month' | 'year') {
+  return unwrap(http.get<{ period: 'month' | 'year'; series: { symbol: string; contribution: number }[] }>(`/portfolios/${id}/return-contribution`, { params: { period } }))
 }

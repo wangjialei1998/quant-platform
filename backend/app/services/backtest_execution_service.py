@@ -16,6 +16,7 @@ from app.models.portfolio import Portfolio, PortfolioInstrument, PortfolioPositi
 from app.models.signal import Signal
 from app.models.trade import CashFlow, Trade
 from app.services.market_data_service import MarketDataService
+from app.services.notification_service import NotificationService
 from app.utils.time import utc_now
 from app.utils.trading_calendar import is_trading_day
 
@@ -98,7 +99,7 @@ class BacktestExecutionService:
             trades, positions, equity_curve = self._parse_sandbox_result(sandbox_result)
 
             self._clear_portfolio_outputs(portfolio.id)
-            self._persist_result(portfolio, instruments, trades, positions, equity_curve, run.id)
+            notification_ids = self._persist_result(portfolio, instruments, trades, positions, equity_curve, run.id)
 
             run.status = "success"
             if equity_curve:
@@ -108,6 +109,7 @@ class BacktestExecutionService:
             portfolio.status = "running"
             portfolio.last_run_at = utc_now()
             self.db.commit()
+            NotificationService.enqueue(notification_ids)
             return {
                 "status": "success",
                 "message": "Backtrader sandbox backtest completed",
@@ -247,8 +249,11 @@ class BacktestExecutionService:
         return trades, positions, equity_curve
 
     def _clear_portfolio_outputs(self, portfolio_id: int) -> None:
+        from app.models.notification import Notification
+
         for model in (PortfolioMetric, PortfolioPosition, CashFlow, Trade, Signal):
             self.db.execute(delete(model).where(model.portfolio_id == portfolio_id))
+        self.db.execute(delete(Notification).where(Notification.portfolio_id == portfolio_id))
         self.db.flush()
 
     def _persist_result(
@@ -259,11 +264,12 @@ class BacktestExecutionService:
         positions: list[SandboxPosition],
         equity_curve: list[SandboxEquity],
         run_id: int,
-    ) -> None:
+    ) -> list[int]:
         instrument_by_symbol = {item.symbol: item for item in instruments}
-        self._persist_trades_and_signals(portfolio, instrument_by_symbol, trades, run_id)
+        notification_ids = self._persist_trades_and_signals(portfolio, instrument_by_symbol, trades, run_id)
         self._persist_positions(portfolio, instrument_by_symbol, positions)
         self._persist_metrics(portfolio, equity_curve, [trade for trade in trades if trade.status == "filled"])
+        return notification_ids
 
     def _persist_trades_and_signals(
         self,
@@ -271,7 +277,9 @@ class BacktestExecutionService:
         instrument_by_symbol: dict[str, Instrument],
         trades: list[SandboxTrade],
         run_id: int,
-    ) -> None:
+    ) -> list[int]:
+        notification_service = NotificationService(self.db)
+        notification_ids: list[int] = []
         for item in trades:
             instrument = instrument_by_symbol.get(item.symbol)
             if not instrument:
@@ -289,6 +297,22 @@ class BacktestExecutionService:
             )
             self.db.add(signal)
             self.db.flush()
+
+            if portfolio.email_enabled:
+                signal_title = f"{portfolio.name} {instrument.symbol} {item.side.upper()} 信号"
+                signal_content = "\n".join(
+                    [
+                        f"组合：{portfolio.name}",
+                        f"标的：{instrument.symbol} {instrument.name}",
+                        f"信号方向：{item.side}",
+                        f"信号日期：{signal.signal_date}",
+                        f"参考价格：{item.price}",
+                        f"状态：{signal.status}",
+                    ]
+                )
+                notification_ids.append(
+                    notification_service.create_event(portfolio, "signal", signal_title, signal_content).id
+                )
 
             trade = Trade(
                 portfolio_id=portfolio.id,
@@ -326,6 +350,26 @@ class BacktestExecutionService:
                         created_at=utc_now(),
                     )
                 )
+                if portfolio.email_enabled:
+                    trade_title = f"{portfolio.name} {instrument.symbol} {item.side.upper()} 成交"
+                    trade_content = "\n".join(
+                        [
+                            f"组合：{portfolio.name}",
+                            f"标的：{instrument.symbol} {instrument.name}",
+                            f"成交方向：{item.side}",
+                            f"信号日期：{signal.signal_date}",
+                            f"成交日期：{item.trade_date}",
+                            f"价格：{item.price}",
+                            f"数量：{item.quantity}",
+                            f"成交金额：{item.gross_amount}",
+                            f"费用：佣金 {item.commission}，印花税 {item.stamp_tax}，滑点 {item.slippage}",
+                            f"当前总资产：{item.total_asset}",
+                        ]
+                    )
+                    notification_ids.append(
+                        notification_service.create_event(portfolio, "trade", trade_title, trade_content).id
+                    )
+        return notification_ids
 
     def _persist_positions(
         self,
@@ -428,11 +472,29 @@ class BacktestExecutionService:
                 message=message,
                 context={"portfolio_id": portfolio_id, "run_id": run_id},
                 portfolio_id=portfolio_id,
+                strategy_id=None,
                 run_id=run_id,
                 created_at=utc_now(),
             )
         )
+        notification_id = None
+        if portfolio and portfolio.email_enabled:
+            notification = NotificationService(self.db).create_event(
+                portfolio,
+                "error",
+                f"{portfolio.name} 运行失败",
+                "\n".join(
+                    [
+                        f"组合：{portfolio.name}",
+                        f"运行ID：{run_id}",
+                        f"错误摘要：{message}",
+                    ]
+                ),
+            )
+            notification_id = notification.id
         self.db.commit()
+        if notification_id:
+            NotificationService.enqueue([notification_id])
 
 
 def _trade_quality(trades: list[SandboxTrade]) -> tuple[float, float]:

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -63,7 +63,14 @@ class MarketDataService:
             if existing_dates:
                 missing_start = start_date if min(existing_dates) > start_date else None
                 missing_end = end_date if max(existing_dates) < end_date else None
-                if missing_start is None and missing_end is None:
+                cached_start = min(existing_dates)
+                cached_end = max(existing_dates)
+                full_span_cached = (
+                    cached_start <= start_date
+                    and cached_end >= end_date
+                    and len(existing_dates) >= _business_day_count(start_date, end_date) * 0.6
+                )
+                if missing_start is None and missing_end is None and full_span_cached:
                     synced.append(
                         {
                             "instrument_id": instrument.id,
@@ -153,3 +160,13 @@ class MarketDataService:
                 )
             saved += 1
         return saved
+
+
+def _business_day_count(start_date: date, end_date: date) -> int:
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if current.weekday() < 5:
+            count += 1
+        current += timedelta(days=1)
+    return count

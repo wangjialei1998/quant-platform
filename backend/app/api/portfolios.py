@@ -1,13 +1,22 @@
+from datetime import date
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.metric import PortfolioMetric
 from app.models.instrument import Instrument
-from app.models.portfolio import Portfolio, PortfolioPosition
+from app.models.market_data import MarketDailyBar
+from app.models.metric import PortfolioMetric
+from app.models.portfolio import Portfolio, PortfolioInstrument, PortfolioPosition
+from app.models.strategy import Strategy
 from app.models.trade import CashFlow, Trade
 from app.schemas.common import MessageResponse, TaskResponse
-from app.schemas.portfolio import PortfolioCreate, PortfolioRead, PortfolioSummary
+from app.schemas.instrument import InstrumentCreate
+from app.schemas.portfolio import PortfolioCreate, PortfolioListItem, PortfolioRead, PortfolioSummary
+from app.services.instrument_service import InstrumentService
+from app.services.market_data_service import MarketDataService
 from app.services.portfolio_service import PortfolioService
 from app.tasks.backtest_tasks import initialize_portfolio
 from app.tasks.monitor_tasks import monitor_portfolio
@@ -16,9 +25,52 @@ from app.utils.errors import NotFoundError, ValidationError
 router = APIRouter()
 
 
-@router.get("", response_model=list[PortfolioRead])
-def list_portfolios(db: Session = Depends(get_db)) -> list[Portfolio]:
-    return db.query(Portfolio).order_by(Portfolio.created_at.desc()).all()
+@router.get("", response_model=list[PortfolioListItem])
+def list_portfolios(db: Session = Depends(get_db)) -> list[PortfolioListItem]:
+    portfolios = db.query(Portfolio).order_by(Portfolio.created_at.desc()).all()
+    if not portfolios:
+        return []
+
+    portfolio_ids = [item.id for item in portfolios]
+    strategy_names = dict(db.query(Strategy.id, Strategy.name).all())
+    instrument_counts = dict(
+        db.query(PortfolioInstrument.portfolio_id, func.count(PortfolioInstrument.id))
+        .filter(PortfolioInstrument.portfolio_id.in_(portfolio_ids))
+        .group_by(PortfolioInstrument.portfolio_id)
+        .all()
+    )
+    latest_dates = dict(
+        db.query(PortfolioMetric.portfolio_id, func.max(PortfolioMetric.metric_date))
+        .filter(PortfolioMetric.portfolio_id.in_(portfolio_ids))
+        .group_by(PortfolioMetric.portfolio_id)
+        .all()
+    )
+    latest_metrics = {}
+    latest_date_values = [item for item in latest_dates.values() if item is not None]
+    if latest_date_values:
+        metric_rows = (
+            db.query(PortfolioMetric)
+            .filter(
+                PortfolioMetric.portfolio_id.in_(portfolio_ids),
+                PortfolioMetric.metric_date.in_(latest_date_values),
+            )
+            .all()
+        )
+        latest_metrics = {
+            item.portfolio_id: item
+            for item in metric_rows
+            if latest_dates.get(item.portfolio_id) == item.metric_date
+        }
+
+    return [
+        _portfolio_list_item(
+            portfolio,
+            strategy_name=strategy_names.get(portfolio.strategy_id) or f"策略 {portfolio.strategy_id}",
+            instrument_count=int(instrument_counts.get(portfolio.id, 0)),
+            metric=latest_metrics.get(portfolio.id),
+        )
+        for portfolio in portfolios
+    ]
 
 
 @router.post("", response_model=TaskResponse)
@@ -128,7 +180,7 @@ def get_portfolio_metrics(portfolio_id: int, db: Session = Depends(get_db)) -> l
 
 
 @router.get("/{portfolio_id}/equity-curve")
-def get_equity_curve(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+def get_equity_curve(portfolio_id: int, benchmark_symbol: str | None = None, db: Session = Depends(get_db)) -> dict:
     rows = (
         db.query(PortfolioMetric)
         .filter(PortfolioMetric.portfolio_id == portfolio_id)
@@ -142,10 +194,11 @@ def get_equity_curve(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
         .order_by(Trade.trade_date)
         .all()
     )
+    benchmark = _benchmark_curve(db, rows, benchmark_symbol)
     return {
         "dates": [item.metric_date.isoformat() for item in rows],
         "portfolio": [round(item.net_value, 6) for item in rows],
-        "benchmark": [],
+        "benchmark": benchmark,
         "trades": [
             {
                 "date": trade.trade_date.isoformat(),
@@ -240,6 +293,71 @@ def get_cash_flows(portfolio_id: int, db: Session = Depends(get_db)) -> list[dic
     ]
 
 
+@router.get("/{portfolio_id}/performance")
+def get_period_performance(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    rows = (
+        db.query(PortfolioMetric)
+        .filter(PortfolioMetric.portfolio_id == portfolio_id)
+        .order_by(PortfolioMetric.metric_date)
+        .all()
+    )
+    monthly = _period_returns(rows, "%Y-%m")
+    yearly = _period_returns(rows, "%Y")
+    return {"monthly": monthly, "yearly": yearly}
+
+
+@router.get("/{portfolio_id}/position-values")
+def get_position_values(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    rows = (
+        db.query(PortfolioPosition, Instrument)
+        .join(Instrument, PortfolioPosition.instrument_id == Instrument.id)
+        .filter(PortfolioPosition.portfolio_id == portfolio_id)
+        .order_by(PortfolioPosition.trade_date.desc(), Instrument.symbol)
+        .limit(2000)
+        .all()
+    )
+    dates = sorted({position.trade_date.isoformat() for position, _ in rows})
+    grouped: dict[str, dict[str, float]] = {}
+    for position, instrument in rows:
+        grouped.setdefault(instrument.symbol, {})[position.trade_date.isoformat()] = float(position.market_value)
+    return {
+        "dates": dates,
+        "series": [
+            {
+                "name": symbol,
+                "data": [round(values.get(day, 0), 2) for day in dates],
+            }
+            for symbol, values in sorted(grouped.items())
+        ],
+    }
+
+
+@router.get("/{portfolio_id}/return-contribution")
+def get_return_contribution(portfolio_id: int, period: str = "month", db: Session = Depends(get_db)) -> dict:
+    if period not in {"month", "year"}:
+        raise HTTPException(status_code=400, detail="period must be month or year")
+    trades = (
+        db.query(Trade, Instrument)
+        .join(Instrument, Trade.instrument_id == Instrument.id)
+        .filter(Trade.portfolio_id == portfolio_id, Trade.status == "filled")
+        .order_by(Trade.trade_date)
+        .all()
+    )
+    grouped: dict[str, Decimal] = {}
+    for trade, instrument in trades:
+        key = trade.trade_date.strftime("%Y" if period == "year" else "%Y-%m")
+        direction = Decimal("-1") if trade.side == "buy" else Decimal("1")
+        grouped_key = f"{key} {instrument.symbol}"
+        grouped[grouped_key] = grouped.get(grouped_key, Decimal("0")) + direction * trade.net_amount
+    return {
+        "period": period,
+        "series": [
+            {"symbol": symbol, "contribution": round(float(value), 2)}
+            for symbol, value in sorted(grouped.items())
+        ],
+    }
+
+
 @router.patch("/{portfolio_id}/email")
 def update_email_enabled(portfolio_id: int, email_enabled: bool, db: Session = Depends(get_db)) -> dict:
     portfolio = db.get(Portfolio, portfolio_id)
@@ -255,3 +373,117 @@ def _metric_value_on(rows: list[PortfolioMetric], trade_date) -> float | None:
         if row.metric_date == trade_date:
             return round(row.net_value, 6)
     return None
+
+
+def _period_returns(rows: list[PortfolioMetric], period_format: str) -> list[dict]:
+    if not rows:
+        return []
+    grouped: dict[str, list[PortfolioMetric]] = {}
+    for row in rows:
+        grouped.setdefault(row.metric_date.strftime(period_format), []).append(row)
+    result = []
+    previous_end_value = 1.0
+    for period, values in sorted(grouped.items()):
+        start_value = previous_end_value
+        end_value = values[-1].net_value
+        result.append(
+            {
+                "period": period,
+                "start_net_value": round(start_value, 6),
+                "end_net_value": round(end_value, 6),
+                "return": round(end_value / start_value - 1, 6) if start_value else 0,
+            }
+        )
+        previous_end_value = end_value
+    return result
+
+
+def _portfolio_list_item(
+    portfolio: Portfolio,
+    strategy_name: str | None,
+    instrument_count: int,
+    metric: PortfolioMetric | None,
+) -> PortfolioListItem:
+    latest_net_value = metric.net_value if metric else 1.0
+    current_total_asset = (portfolio.initial_cash * Decimal(str(latest_net_value))).quantize(Decimal("0.01"))
+    return PortfolioListItem(
+        id=portfolio.id,
+        name=portfolio.name,
+        strategy_id=portfolio.strategy_id,
+        initial_cash=portfolio.initial_cash,
+        start_date=portfolio.start_date,
+        status=portfolio.status,
+        email_enabled=portfolio.email_enabled,
+        commission_rate=portfolio.commission_rate,
+        stamp_tax_rate=portfolio.stamp_tax_rate,
+        slippage_rate=portfolio.slippage_rate,
+        last_run_at=portfolio.last_run_at,
+        created_at=portfolio.created_at,
+        updated_at=portfolio.updated_at,
+        strategy_name=strategy_name,
+        instrument_count=instrument_count,
+        latest_net_value=latest_net_value,
+        current_total_asset=current_total_asset,
+        total_return=metric.total_return if metric else 0.0,
+        max_drawdown=metric.max_drawdown if metric else 0.0,
+        latest_metric_date=metric.metric_date if metric else None,
+    )
+
+
+def _benchmark_curve(db: Session, rows: list[PortfolioMetric], benchmark_symbol: str | None) -> list[float | None]:
+    if not rows or not benchmark_symbol:
+        return []
+
+    start_date: date = rows[0].metric_date
+    end_date: date = rows[-1].metric_date
+    normalized_symbol = "000300.SH" if benchmark_symbol in {"沪深300", "HS300", "CSI300"} else benchmark_symbol
+    try:
+        instrument = InstrumentService(db).create(
+            InstrumentCreate(
+                symbol=normalized_symbol,
+                name="沪深300" if normalized_symbol in {"000300", "000300.SH"} else None,
+                instrument_type="index",
+                exchange="SSE",
+            )
+        )
+        MarketDataService(db).ensure_daily_bars([instrument], start_date, end_date)
+        db.commit()
+    except Exception:
+        db.rollback()
+        instrument = (
+            db.query(Instrument)
+            .filter(Instrument.symbol.in_([normalized_symbol, "000300.SH"]))
+            .first()
+        )
+        if not instrument:
+            return [None for _ in rows]
+
+    bars = (
+        db.query(MarketDailyBar)
+        .filter(
+            MarketDailyBar.instrument_id == instrument.id,
+            MarketDailyBar.trade_date >= start_date,
+            MarketDailyBar.trade_date <= end_date,
+            MarketDailyBar.adjustment_type == "none",
+        )
+        .order_by(MarketDailyBar.trade_date)
+        .all()
+    )
+    if not bars:
+        return [None for _ in rows]
+
+    bar_by_date = {bar.trade_date: float(bar.close) for bar in bars}
+    first_close: float | None = None
+    last_close: float | None = None
+    curve: list[float | None] = []
+    for row in rows:
+        close = bar_by_date.get(row.metric_date)
+        if close is not None:
+            last_close = close
+            if first_close is None:
+                first_close = close
+        if first_close and last_close:
+            curve.append(round(last_close / first_close, 6))
+        else:
+            curve.append(None)
+    return curve
