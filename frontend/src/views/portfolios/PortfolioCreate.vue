@@ -21,10 +21,6 @@ const form = reactive({
 })
 const instrumentForm = reactive({
   symbol: '',
-  name: '',
-  instrument_type: 'stock' as 'stock' | 'etf' | 'index',
-  exchange: 'SSE',
-  is_active: true,
 })
 const selectorKey = ref(0)
 
@@ -40,14 +36,29 @@ async function submit() {
 }
 
 async function addInstrument() {
-  const instrument = await createInstrument(instrumentForm)
+  const symbol = instrumentForm.symbol.trim()
+  if (!symbol) return
+  const instrument = await createInstrument({
+    symbol,
+    name: symbol,
+    instrument_type: inferInstrumentType(symbol),
+    exchange: inferExchange(symbol),
+    is_active: true,
+  })
   if (!form.instrument_ids.includes(instrument.id)) {
     form.instrument_ids.push(instrument.id)
   }
   selectorKey.value += 1
   instrumentForm.symbol = ''
-  instrumentForm.name = ''
   ElMessage.success('标的已添加')
+}
+
+function inferExchange(symbol: string) {
+  return symbol.startsWith('6') || symbol.startsWith('5') ? 'SSE' : 'SZSE'
+}
+
+function inferInstrumentType(symbol: string): 'stock' | 'etf' {
+  return symbol.startsWith('5') || symbol.startsWith('1') ? 'etf' : 'stock'
 }
 
 onMounted(async () => {
@@ -78,16 +89,6 @@ onMounted(async () => {
         <el-form-item label="新增标的">
           <div class="instrument-inline">
             <el-input v-model="instrumentForm.symbol" placeholder="代码，如 510300" />
-            <el-input v-model="instrumentForm.name" placeholder="名称" />
-            <el-select v-model="instrumentForm.instrument_type">
-              <el-option label="股票" value="stock" />
-              <el-option label="ETF" value="etf" />
-              <el-option label="指数" value="index" />
-            </el-select>
-            <el-select v-model="instrumentForm.exchange">
-              <el-option label="上交所" value="SSE" />
-              <el-option label="深交所" value="SZSE" />
-            </el-select>
             <el-button @click="addInstrument">添加</el-button>
           </div>
         </el-form-item>
@@ -109,7 +110,7 @@ onMounted(async () => {
 .instrument-inline {
   display: grid;
   width: 100%;
-  grid-template-columns: 1fr 1fr 120px 120px auto;
+  grid-template-columns: minmax(180px, 320px) auto;
   gap: 8px;
 }
 </style>

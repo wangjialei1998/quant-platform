@@ -53,12 +53,30 @@ export function getPortfolioSummary(id: number) {
   return unwrap(http.get<Record<string, unknown>>(`/portfolios/${id}/summary`))
 }
 
+export function updatePortfolioEmail(id: number, emailEnabled: boolean) {
+  return unwrap(http.patch<{ message: string; email_enabled: boolean }>(`/portfolios/${id}/email`, null, {
+    params: { email_enabled: emailEnabled },
+  }))
+}
+
+export interface EquityCurvePayload {
+  dates: string[]
+  portfolio: number[]
+  benchmark: number[]
+  trades: { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[]
+}
+
+export interface DrawdownPayload {
+  dates: string[]
+  drawdown: number[]
+}
+
 export function getEquityCurve(id: number) {
-  return unwrap(http.get(`/portfolios/${id}/equity-curve`))
+  return unwrap(http.get<EquityCurvePayload>(`/portfolios/${id}/equity-curve`))
 }
 
 export function getDrawdown(id: number) {
-  return unwrap(http.get(`/portfolios/${id}/drawdown`))
+  return unwrap(http.get<DrawdownPayload>(`/portfolios/${id}/drawdown`))
 }
 
 export function getTrades(id: number) {

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
 from app.models.portfolio import Portfolio
+from app.services.demo_backtest_service import DemoBacktestService
 from app.tasks.celery_app import celery_app
 
 
@@ -12,12 +13,6 @@ def initialize_portfolio(portfolio_id: int) -> dict:
         portfolio = db.get(Portfolio, portfolio_id)
         if not portfolio:
             return {"status": "failed", "message": "Portfolio not found"}
-        portfolio.status = "running"
-        portfolio.last_run_at = datetime.now(timezone.utc)
-        db.commit()
-        return {
-            "status": "success",
-            "message": "组合初始化回测任务接口已建立，回测明细实现待补充",
-        }
+        return DemoBacktestService(db).initialize_portfolio(portfolio_id)
     finally:
         db.close()

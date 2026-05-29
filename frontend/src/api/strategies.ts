@@ -8,6 +8,7 @@ export interface Strategy {
   code_hash: string
   test_status: string
   test_log?: string
+  code?: string
   last_tested_at?: string
   created_at: string
   updated_at: string

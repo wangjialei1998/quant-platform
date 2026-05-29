@@ -38,9 +38,19 @@ onMounted(load)
       <el-descriptions-item label="代码哈希">{{ strategy.code_hash }}</el-descriptions-item>
     </el-descriptions>
     <el-card shadow="never">
+      <template #header>策略代码</template>
+      <el-input :model-value="strategy?.code || ''" type="textarea" :rows="24" readonly class="code-viewer" />
+    </el-card>
+    <el-card shadow="never">
       <template #header>最近测试日志</template>
       <pre>{{ strategy?.test_log || '暂无日志' }}</pre>
     </el-card>
   </section>
 </template>
 
+<style scoped>
+.code-viewer :deep(textarea) {
+  font-family: "Cascadia Code", Consolas, monospace;
+  line-height: 1.55;
+}
+</style>

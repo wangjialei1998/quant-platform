@@ -25,7 +25,7 @@ class StrategyRead(OrmModel):
     code_hash: str
     test_status: str
     test_log: str | None
+    code: str | None = None
     last_tested_at: datetime | None
     created_at: datetime
     updated_at: datetime
-

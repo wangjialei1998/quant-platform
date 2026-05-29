@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.metric import PortfolioMetric
+from app.models.instrument import Instrument
 from app.models.portfolio import Portfolio, PortfolioPosition
 from app.models.trade import CashFlow, Trade
 from app.schemas.common import MessageResponse, TaskResponse
@@ -88,16 +89,34 @@ def get_portfolio_summary(portfolio_id: int, db: Session = Depends(get_db)) -> P
         name=portfolio.name,
         status=portfolio.status,
         latest_net_value=metric.net_value if metric else 1.0,
+        annual_return=metric.annual_return if metric else 0.0,
+        win_rate=metric.win_rate if metric else 0.0,
+        profit_loss_ratio=metric.profit_loss_ratio if metric else 0.0,
+        sharpe_ratio=metric.sharpe_ratio if metric else 0.0,
+        current_drawdown=metric.current_drawdown if metric else 0.0,
         total_return=metric.total_return if metric else 0.0,
         max_drawdown=metric.max_drawdown if metric else 0.0,
+        max_drawdown_days=metric.max_drawdown_days if metric else 0,
+        volatility=metric.volatility if metric else 0.0,
+        sqn=metric.sqn if metric else 0.0,
+        vwr=metric.vwr if metric else 0.0,
         trade_count=metric.trade_count if metric else 0,
+        running_days=metric.running_days if metric else 0,
+        start_date=portfolio.start_date,
+        updated_at=portfolio.updated_at,
+        email_enabled=portfolio.email_enabled,
         last_run_at=portfolio.last_run_at,
     )
 
 
 @router.get("/{portfolio_id}/metrics")
 def get_portfolio_metrics(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
-    rows = db.query(PortfolioMetric).filter(PortfolioMetric.portfolio_id == portfolio_id).all()
+    rows = (
+        db.query(PortfolioMetric)
+        .filter(PortfolioMetric.portfolio_id == portfolio_id)
+        .order_by(PortfolioMetric.metric_date)
+        .all()
+    )
     return [
         {
             "date": item.metric_date,
@@ -110,22 +129,64 @@ def get_portfolio_metrics(portfolio_id: int, db: Session = Depends(get_db)) -> l
 
 
 @router.get("/{portfolio_id}/equity-curve")
-def get_equity_curve(portfolio_id: int) -> dict:
-    return {"dates": [], "portfolio": [], "benchmark": []}
+def get_equity_curve(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    rows = (
+        db.query(PortfolioMetric)
+        .filter(PortfolioMetric.portfolio_id == portfolio_id)
+        .order_by(PortfolioMetric.metric_date)
+        .all()
+    )
+    trades = (
+        db.query(Trade, Instrument)
+        .join(Instrument, Trade.instrument_id == Instrument.id)
+        .filter(Trade.portfolio_id == portfolio_id, Trade.status == "filled")
+        .order_by(Trade.trade_date)
+        .all()
+    )
+    return {
+        "dates": [item.metric_date.isoformat() for item in rows],
+        "portfolio": [round(item.net_value, 6) for item in rows],
+        "benchmark": [],
+        "trades": [
+            {
+                "date": trade.trade_date.isoformat(),
+                "side": trade.side,
+                "symbol": instrument.symbol,
+                "net_value": _metric_value_on(rows, trade.trade_date),
+            }
+            for trade, instrument in trades
+        ],
+    }
 
 
 @router.get("/{portfolio_id}/drawdown")
-def get_drawdown(portfolio_id: int) -> dict:
-    return {"dates": [], "drawdown": []}
+def get_drawdown(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    rows = (
+        db.query(PortfolioMetric)
+        .filter(PortfolioMetric.portfolio_id == portfolio_id)
+        .order_by(PortfolioMetric.metric_date)
+        .all()
+    )
+    return {
+        "dates": [item.metric_date.isoformat() for item in rows],
+        "drawdown": [round(item.current_drawdown, 6) for item in rows],
+    }
 
 
 @router.get("/{portfolio_id}/positions")
 def get_positions(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
     rows = db.query(PortfolioPosition).filter(PortfolioPosition.portfolio_id == portfolio_id).limit(500).all()
+    instruments = {
+        item.id: item
+        for item in db.query(Instrument)
+        .filter(Instrument.id.in_([row.instrument_id for row in rows] or [0]))
+        .all()
+    }
     return [
         {
             "date": item.trade_date,
             "instrument_id": item.instrument_id,
+            "symbol": instruments[item.instrument_id].symbol if item.instrument_id in instruments else item.instrument_id,
             "quantity": item.quantity,
             "market_value": item.market_value,
             "weight": item.weight,
@@ -137,10 +198,17 @@ def get_positions(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict
 @router.get("/{portfolio_id}/trades")
 def get_trades(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
     rows = db.query(Trade).filter(Trade.portfolio_id == portfolio_id).order_by(Trade.trade_date.desc()).limit(500).all()
+    instruments = {
+        item.id: item
+        for item in db.query(Instrument)
+        .filter(Instrument.id.in_([row.instrument_id for row in rows] or [0]))
+        .all()
+    }
     return [
         {
             "trade_date": item.trade_date,
             "instrument_id": item.instrument_id,
+            "symbol": instruments[item.instrument_id].symbol if item.instrument_id in instruments else item.instrument_id,
             "side": item.side,
             "quantity": item.quantity,
             "price": item.price,
@@ -153,7 +221,13 @@ def get_trades(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
 
 @router.get("/{portfolio_id}/cash-flows")
 def get_cash_flows(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
-    rows = db.query(CashFlow).filter(CashFlow.portfolio_id == portfolio_id).order_by(CashFlow.flow_date.desc()).limit(500).all()
+    rows = (
+        db.query(CashFlow)
+        .filter(CashFlow.portfolio_id == portfolio_id, CashFlow.flow_type.in_(["buy", "sell"]))
+        .order_by(CashFlow.flow_date.desc())
+        .limit(500)
+        .all()
+    )
     return [
         {
             "flow_date": item.flow_date,
@@ -166,3 +240,19 @@ def get_cash_flows(portfolio_id: int, db: Session = Depends(get_db)) -> list[dic
         for item in rows
     ]
 
+
+@router.patch("/{portfolio_id}/email")
+def update_email_enabled(portfolio_id: int, email_enabled: bool, db: Session = Depends(get_db)) -> dict:
+    portfolio = db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    portfolio.email_enabled = email_enabled
+    db.commit()
+    return {"message": "ok", "email_enabled": portfolio.email_enabled}
+
+
+def _metric_value_on(rows: list[PortfolioMetric], trade_date) -> float | None:
+    for row in rows:
+        if row.metric_date == trade_date:
+            return round(row.net_value, 6)
+    return None

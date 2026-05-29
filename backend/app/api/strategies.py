@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -40,7 +41,15 @@ def get_strategy(strategy_id: int, db: Session = Depends(get_db)) -> Strategy:
     strategy = db.get(Strategy, strategy_id)
     if not strategy:
         raise HTTPException(status_code=404, detail="Strategy not found")
+    strategy.code = _read_strategy_code(strategy.code_path)
     return strategy
+
+
+def _read_strategy_code(code_path: str) -> str:
+    try:
+        return Path(code_path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 @router.patch("/{strategy_id}", response_model=StrategyRead)
