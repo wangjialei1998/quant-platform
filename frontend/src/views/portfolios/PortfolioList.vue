@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Delete, Plus, Refresh, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -96,9 +96,10 @@ onMounted(load)
         <el-table-column prop="status" label="状态" width="120" />
         <el-table-column prop="latest_metric_date" label="最新指标日" width="130" />
         <el-table-column prop="last_run_at" label="最近运行" width="190" />
-        <el-table-column label="操作" width="340" fixed="right">
+        <el-table-column label="操作" width="400" fixed="right">
           <template #default="{ row }">
             <el-button text @click="router.push(`/portfolios/${row.id}`)">详情</el-button>
+            <el-button :icon="Edit" text @click="router.push(`/portfolios/${row.id}/edit`)">修改</el-button>
             <el-button text @click="router.push(`/portfolios/${row.id}/signals`)">信号洞察</el-button>
             <el-button :icon="VideoPlay" text @click="run(row)">更新</el-button>
             <el-button text @click="toggle(row)">{{ row.status === 'paused' ? '恢复' : '暂停' }}</el-button>

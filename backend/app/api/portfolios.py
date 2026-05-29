@@ -14,7 +14,7 @@ from app.models.strategy import Strategy
 from app.models.trade import CashFlow, Trade
 from app.schemas.common import MessageResponse, TaskResponse
 from app.schemas.instrument import InstrumentCreate
-from app.schemas.portfolio import PortfolioCreate, PortfolioListItem, PortfolioRead, PortfolioSummary
+from app.schemas.portfolio import PortfolioCreate, PortfolioListItem, PortfolioRead, PortfolioSummary, PortfolioUpdate
 from app.services.instrument_service import InstrumentService
 from app.services.market_data_service import MarketDataService
 from app.services.portfolio_service import PortfolioService
@@ -89,6 +89,45 @@ def get_portfolio(portfolio_id: int, db: Session = Depends(get_db)) -> Portfolio
     if not portfolio:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     return portfolio
+
+
+@router.get("/{portfolio_id}/edit")
+def get_portfolio_edit(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    portfolio = db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    instrument_ids = [
+        row.instrument_id
+        for row in db.query(PortfolioInstrument.instrument_id)
+        .filter(PortfolioInstrument.portfolio_id == portfolio_id)
+        .order_by(PortfolioInstrument.instrument_id)
+        .all()
+    ]
+    return {
+        "id": portfolio.id,
+        "name": portfolio.name,
+        "strategy_id": portfolio.strategy_id,
+        "instrument_ids": instrument_ids,
+        "initial_cash": portfolio.initial_cash,
+        "start_date": portfolio.start_date,
+        "email_enabled": portfolio.email_enabled,
+        "commission_rate": portfolio.commission_rate,
+        "stamp_tax_rate": portfolio.stamp_tax_rate,
+        "slippage_rate": portfolio.slippage_rate,
+        "status": portfolio.status,
+    }
+
+
+@router.patch("/{portfolio_id}", response_model=TaskResponse)
+def update_portfolio(portfolio_id: int, payload: PortfolioUpdate, db: Session = Depends(get_db)) -> TaskResponse:
+    try:
+        portfolio = PortfolioService(db).update(portfolio_id, payload)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    task = initialize_portfolio.delay(portfolio.id)
+    return TaskResponse(task_id=task.id)
 
 
 @router.delete("/{portfolio_id}", response_model=MessageResponse)

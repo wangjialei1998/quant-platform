@@ -4,6 +4,7 @@ import AppLayout from '@/layouts/AppLayout.vue'
 import MarketDataCache from '@/views/market-data/MarketDataCache.vue'
 import PortfolioCreate from '@/views/portfolios/PortfolioCreate.vue'
 import PortfolioDetail from '@/views/portfolios/PortfolioDetail.vue'
+import PortfolioEdit from '@/views/portfolios/PortfolioEdit.vue'
 import PortfolioList from '@/views/portfolios/PortfolioList.vue'
 import SignalInsight from '@/views/signals/SignalInsight.vue'
 import StrategyDetail from '@/views/strategies/StrategyDetail.vue'
@@ -24,6 +25,7 @@ const router = createRouter({
         { path: 'strategies/:id', component: StrategyDetail },
         { path: 'portfolios', component: PortfolioList },
         { path: 'portfolios/new', component: PortfolioCreate },
+        { path: 'portfolios/:id/edit', component: PortfolioEdit },
         { path: 'portfolios/:id', component: PortfolioDetail },
         { path: 'portfolios/:id/signals', component: SignalInsight },
         { path: 'market-data/cache', component: MarketDataCache },
@@ -34,4 +36,3 @@ const router = createRouter({
 })
 
 export default router
-

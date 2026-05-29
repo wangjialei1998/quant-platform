@@ -35,6 +35,16 @@ export interface PortfolioCreate {
   slippage_rate?: string
 }
 
+export interface PortfolioEditPayload extends PortfolioCreate {}
+
+export interface PortfolioEditData extends PortfolioCreate {
+  id: number
+  status: string
+  commission_rate: string
+  stamp_tax_rate: string
+  slippage_rate: string
+}
+
 export function listPortfolios() {
   return unwrap(http.get<Portfolio[]>('/portfolios'))
 }
@@ -43,8 +53,16 @@ export function getPortfolio(id: number) {
   return unwrap(http.get<Portfolio>(`/portfolios/${id}`))
 }
 
+export function getPortfolioEdit(id: number) {
+  return unwrap(http.get<PortfolioEditData>(`/portfolios/${id}/edit`))
+}
+
 export function createPortfolio(payload: PortfolioCreate) {
   return unwrap(http.post<{ task_id: string; status: string }>('/portfolios', payload))
+}
+
+export function updatePortfolio(id: number, payload: PortfolioEditPayload) {
+  return unwrap(http.patch<{ task_id: string; status: string }>(`/portfolios/${id}`, payload))
 }
 
 export function pausePortfolio(id: number) {

@@ -18,6 +18,18 @@ class PortfolioCreate(OrmModel):
     slippage_rate: Decimal | None = None
 
 
+class PortfolioUpdate(OrmModel):
+    name: str = Field(min_length=1, max_length=100)
+    strategy_id: int
+    instrument_ids: list[int] = Field(min_length=1)
+    initial_cash: Decimal = Field(gt=0)
+    start_date: date
+    email_enabled: bool = True
+    commission_rate: Decimal | None = None
+    stamp_tax_rate: Decimal | None = None
+    slippage_rate: Decimal | None = None
+
+
 class PortfolioRead(OrmModel):
     id: int
     name: str
