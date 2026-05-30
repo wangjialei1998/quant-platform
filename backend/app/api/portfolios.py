@@ -1,3 +1,4 @@
+from bisect import bisect_right
 from datetime import date
 from decimal import Decimal
 
@@ -375,25 +376,92 @@ def get_position_values(portfolio_id: int, db: Session = Depends(get_db)) -> dic
 def get_return_contribution(portfolio_id: int, period: str = "month", db: Session = Depends(get_db)) -> dict:
     if period not in {"month", "year"}:
         raise HTTPException(status_code=400, detail="period must be month or year")
-    trades = (
-        db.query(Trade, Instrument)
-        .join(Instrument, Trade.instrument_id == Instrument.id)
+    portfolio = db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+
+    instruments = (
+        db.query(Instrument)
+        .join(PortfolioInstrument, PortfolioInstrument.instrument_id == Instrument.id)
+        .filter(PortfolioInstrument.portfolio_id == portfolio_id)
+        .order_by(Instrument.symbol)
+        .all()
+    )
+    metrics = (
+        db.query(PortfolioMetric)
+        .filter(PortfolioMetric.portfolio_id == portfolio_id)
+        .order_by(PortfolioMetric.metric_date)
+        .all()
+    )
+    if not instruments or not metrics:
+        return {"period": period, "periods": [], "symbols": [], "series": []}
+
+    period_format = "%Y" if period == "year" else "%Y-%m"
+    metric_groups: dict[str, list[PortfolioMetric]] = {}
+    for metric in metrics:
+        metric_groups.setdefault(metric.metric_date.strftime(period_format), []).append(metric)
+
+    position_rows = (
+        db.query(PortfolioPosition)
+        .filter(PortfolioPosition.portfolio_id == portfolio_id)
+        .order_by(PortfolioPosition.instrument_id, PortfolioPosition.trade_date)
+        .all()
+    )
+    position_values: dict[int, list[tuple[date, Decimal]]] = {instrument.id: [] for instrument in instruments}
+    for position in position_rows:
+        position_values.setdefault(position.instrument_id, []).append((position.trade_date, position.market_value))
+    position_dates = {
+        instrument_id: [item[0] for item in values]
+        for instrument_id, values in position_values.items()
+    }
+
+    trade_rows = (
+        db.query(Trade)
         .filter(Trade.portfolio_id == portfolio_id, Trade.status == "filled")
         .order_by(Trade.trade_date)
         .all()
     )
-    grouped: dict[str, Decimal] = {}
-    for trade, instrument in trades:
-        key = trade.trade_date.strftime("%Y" if period == "year" else "%Y-%m")
-        direction = Decimal("-1") if trade.side == "buy" else Decimal("1")
-        grouped_key = f"{key} {instrument.symbol}"
-        grouped[grouped_key] = grouped.get(grouped_key, Decimal("0")) + direction * trade.net_amount
+    trade_amounts: dict[tuple[str, int], dict[str, Decimal]] = {}
+    for trade in trade_rows:
+        key = (trade.trade_date.strftime(period_format), trade.instrument_id)
+        amounts = trade_amounts.setdefault(key, {"buy": Decimal("0"), "sell": Decimal("0")})
+        if trade.side == "buy":
+            amounts["buy"] += trade.net_amount
+        elif trade.side == "sell":
+            amounts["sell"] += trade.net_amount
+
+    periods = sorted(metric_groups)
+    series = [{"symbol": instrument.symbol, "data": []} for instrument in instruments]
+    previous_metric: PortfolioMetric | None = None
+
+    for period_key in periods:
+        group = metric_groups[period_key]
+        end_metric = group[-1]
+        start_asset = (
+            portfolio.initial_cash * Decimal(str(previous_metric.net_value))
+            if previous_metric
+            else portfolio.initial_cash
+        )
+        start_date = previous_metric.metric_date if previous_metric else None
+        end_date = end_metric.metric_date
+
+        for index, instrument in enumerate(instruments):
+            values = position_values.get(instrument.id, [])
+            dates = position_dates.get(instrument.id, [])
+            start_value = _position_value_on(values, dates, start_date)
+            end_value = _position_value_on(values, dates, end_date)
+            amounts = trade_amounts.get((period_key, instrument.id), {"buy": Decimal("0"), "sell": Decimal("0")})
+            profit = end_value - start_value - amounts["buy"] + amounts["sell"]
+            contribution = profit / start_asset if start_asset > 0 else Decimal("0")
+            series[index]["data"].append(round(float(contribution), 6))
+
+        previous_metric = end_metric
+
     return {
         "period": period,
-        "series": [
-            {"symbol": symbol, "contribution": round(float(value), 2)}
-            for symbol, value in sorted(grouped.items())
-        ],
+        "periods": periods,
+        "symbols": [instrument.symbol for instrument in instruments],
+        "series": series,
     }
 
 
@@ -435,6 +503,19 @@ def _period_returns(rows: list[PortfolioMetric], period_format: str) -> list[dic
         )
         previous_end_value = end_value
     return result
+
+
+def _position_value_on(
+    values: list[tuple[date, Decimal]],
+    dates: list[date],
+    target_date: date | None,
+) -> Decimal:
+    if target_date is None or not values:
+        return Decimal("0")
+    index = bisect_right(dates, target_date) - 1
+    if index < 0:
+        return Decimal("0")
+    return values[index][1]
 
 
 def _portfolio_list_item(

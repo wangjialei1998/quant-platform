@@ -1,9 +1,9 @@
 <script setup lang="ts">
+import type { EChartsOption } from 'echarts'
 import { ArrowLeft, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import type { EChartsOption } from 'echarts'
 import {
   getCashFlows,
   getDrawdown,
@@ -12,37 +12,43 @@ import {
   getPortfolioPerformance,
   getPortfolioSummary,
   getPositionValues,
-  getReturnContribution,
   getPositions,
+  getReturnContribution,
   getTrades,
   runPortfolio,
   updatePortfolioEmail,
   type Portfolio,
+  type ReturnContributionPayload,
 } from '@/api/portfolios'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import TaskStatus from '@/components/common/TaskStatus.vue'
 import MetricCards from '@/components/portfolio/MetricCards.vue'
 
+type Period = 'month' | 'year'
+type PerformanceItem = {
+  period: string
+  return: number
+  start_net_value: number
+  end_net_value: number
+}
+
 const route = useRoute()
 const router = useRouter()
 const portfolioId = Number(route.params.id)
+
 const portfolio = ref<Portfolio>()
 const summary = ref<Record<string, unknown>>()
 const trades = ref<Record<string, unknown>[]>([])
 const positions = ref<Record<string, unknown>[]>([])
 const cashFlows = ref<Record<string, unknown>[]>([])
 const performance = ref({
-  monthly: [] as { period: string; return: number; start_net_value: number; end_net_value: number }[],
-  yearly: [] as { period: string; return: number; start_net_value: number; end_net_value: number }[],
+  monthly: [] as PerformanceItem[],
+  yearly: [] as PerformanceItem[],
 })
 const positionValues = ref({ dates: [] as string[], series: [] as { name: string; data: number[] }[] })
-const returnContribution = ref({ period: 'month' as 'month' | 'year', series: [] as { symbol: string; contribution: number }[] })
-const contributionPeriod = ref<'month' | 'year'>('month')
-const contributionPeriodOptions = [
-  { label: '月度', value: 'month' },
-  { label: '年度', value: 'year' },
-]
-let loadingContribution = false
+const instrumentContribution = ref<ReturnContributionPayload>(emptyContribution('month'))
+const instrumentContributionPeriod = ref<Period>('month')
+const assetContributionPeriod = ref<Period>('month')
 const taskId = ref('')
 const equityCurve = ref({
   dates: [] as string[],
@@ -59,6 +65,11 @@ const equityBenchmarks = [
 ]
 const drawdown = ref({ dates: [] as string[], drawdown: [] as number[] })
 const emailEnabled = ref(false)
+
+const periodOptions = [
+  { label: '月度', value: 'month' },
+  { label: '年度', value: 'year' },
+]
 
 const equityOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'axis' },
@@ -87,48 +98,50 @@ const equityOption = computed<EChartsOption>(() => ({
 }))
 
 const drawdownOption = computed<EChartsOption>(() => ({
-  tooltip: { trigger: 'axis' },
+  tooltip: { trigger: 'axis', valueFormatter: percentFormatter },
   grid: { left: 48, right: 24, top: 36, bottom: 48 },
   xAxis: { type: 'category', data: drawdown.value.dates },
-  yAxis: { type: 'value' },
+  yAxis: { type: 'value', axisLabel: { formatter: (value: number) => percentFormatter(value) } },
   series: [{ name: '回撤', type: 'line', areaStyle: {}, data: drawdown.value.drawdown }],
 }))
 
-const performanceOption = computed<EChartsOption>(() => ({
-  tooltip: { trigger: 'axis', valueFormatter: (value) => `${(Number(value) * 100).toFixed(2)}%` },
-  legend: { top: 0 },
-  grid: { top: 48, left: 48, right: 24, bottom: 48 },
-  xAxis: { type: 'category', data: performance.value.monthly.map((item) => item.period) },
-  yAxis: { type: 'value', axisLabel: { formatter: (value: number) => `${(value * 100).toFixed(0)}%` } },
+const instrumentContributionOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'axis', valueFormatter: percentFormatter },
+  legend: { top: 0, type: 'scroll' },
+  grid: { top: 52, left: 56, right: 24, bottom: 54 },
   dataZoom: [{ type: 'inside' }, { type: 'slider' }],
-  series: [
-    {
-      name: '月度收益',
-      type: 'bar',
-      data: performance.value.monthly.map((item) => item.return),
-      itemStyle: { color: '#2563eb' },
-    },
-  ],
+  xAxis: { type: 'category', data: instrumentContribution.value.periods },
+  yAxis: { type: 'value', axisLabel: { formatter: (value: number) => percentFormatter(value) } },
+  series: instrumentContribution.value.series.map((item) => ({
+    name: item.symbol,
+    type: 'bar',
+    data: item.data,
+  })),
 }))
 
-const contributionOption = computed<EChartsOption>(() => ({
-  tooltip: { trigger: 'axis' },
-  grid: { left: 56, right: 24, top: 28, bottom: 42 },
-  xAxis: { type: 'category', data: returnContribution.value.series.map((item) => item.symbol) },
-  yAxis: { type: 'value' },
+const selectedPerformance = computed(() =>
+  assetContributionPeriod.value === 'month' ? performance.value.monthly : performance.value.yearly,
+)
+
+const assetContributionOption = computed<EChartsOption>(() => ({
+  tooltip: { trigger: 'axis', valueFormatter: percentFormatter },
+  grid: { top: 36, left: 56, right: 24, bottom: 54 },
+  dataZoom: [{ type: 'inside' }, { type: 'slider' }],
+  xAxis: { type: 'category', data: selectedPerformance.value.map((item) => item.period) },
+  yAxis: { type: 'value', axisLabel: { formatter: (value: number) => percentFormatter(value) } },
   series: [
     {
-      name: contributionPeriod.value === 'month' ? '月度收益贡献' : '年度收益贡献',
+      name: assetContributionPeriod.value === 'month' ? '月度总资产贡献率' : '年度总资产贡献率',
       type: 'bar',
-      data: returnContribution.value.series.map((item) => item.contribution),
-      itemStyle: { color: '#0f766e' },
+      data: selectedPerformance.value.map((item) => item.return),
+      itemStyle: { color: '#2563eb' },
     },
   ],
 }))
 
 const positionValueOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'axis' },
-  legend: { top: 0 },
+  legend: { top: 0, type: 'scroll' },
   grid: { top: 48, left: 56, right: 24, bottom: 48 },
   xAxis: { type: 'category', data: positionValues.value.dates },
   yAxis: { type: 'value' },
@@ -152,17 +165,15 @@ async function load() {
   cashFlows.value = await getCashFlows(portfolioId)
   performance.value = await getPortfolioPerformance(portfolioId)
   positionValues.value = await getPositionValues(portfolioId)
-  await loadContribution()
+  await loadInstrumentContribution()
 }
 
 async function loadEquityCurve() {
   equityCurve.value = await getEquityCurve(portfolioId)
 }
 
-async function loadContribution() {
-  loadingContribution = true
-  returnContribution.value = await getReturnContribution(portfolioId, contributionPeriod.value)
-  loadingContribution = false
+async function loadInstrumentContribution() {
+  instrumentContribution.value = await getReturnContribution(portfolioId, instrumentContributionPeriod.value)
 }
 
 async function toggleEmail(value: boolean | string | number) {
@@ -177,13 +188,19 @@ async function run() {
   ElMessage.success('组合更新任务已提交')
 }
 
-watch(contributionPeriod, () => {
-  if (!loadingContribution) loadContribution()
-})
+watch(instrumentContributionPeriod, loadInstrumentContribution)
 onMounted(load)
 
 function benchmarkCurve(annualReturn: number) {
   return equityCurve.value.dates.map((_, index) => Number(((1 + annualReturn) ** (index / 252)).toFixed(6)))
+}
+
+function emptyContribution(period: Period): ReturnContributionPayload {
+  return { period, periods: [], symbols: [], series: [] }
+}
+
+function percentFormatter(value: unknown) {
+  return `${(Number(value || 0) * 100).toFixed(2)}%`
 }
 </script>
 
@@ -199,39 +216,47 @@ function benchmarkCurve(annualReturn: number) {
         <el-button type="primary" :icon="Refresh" @click="run">手动更新</el-button>
       </div>
     </div>
+
     <TaskStatus :task-id="taskId" />
     <MetricCards :summary="summary" />
+
     <el-card shadow="never" class="chart-panel">
-      <template #header>
-        <div class="chart-header">
-          <span>盈利曲线</span>
-        </div>
-      </template>
+      <template #header>盈利曲线</template>
       <BaseChart :option="equityOption" />
     </el-card>
+
     <el-card shadow="never" class="chart-panel">
       <template #header>回撤曲线</template>
       <BaseChart :option="drawdownOption" />
     </el-card>
+
     <div class="detail-grid">
-      <el-card shadow="never" class="chart-panel">
-        <template #header>月度表现</template>
-        <BaseChart :option="performanceOption" />
-      </el-card>
       <el-card shadow="never" class="chart-panel">
         <template #header>
           <div class="chart-header">
-            <span>收益贡献</span>
-            <el-segmented v-model="contributionPeriod" :options="contributionPeriodOptions" />
+            <span>月度收益贡献表</span>
+            <el-segmented v-model="instrumentContributionPeriod" :options="periodOptions" />
           </div>
         </template>
-        <BaseChart :option="contributionOption" />
+        <BaseChart :option="instrumentContributionOption" />
+      </el-card>
+
+      <el-card shadow="never" class="chart-panel">
+        <template #header>
+          <div class="chart-header">
+            <span>年/月度收益表</span>
+            <el-segmented v-model="assetContributionPeriod" :options="periodOptions" />
+          </div>
+        </template>
+        <BaseChart :option="assetContributionOption" />
       </el-card>
     </div>
+
     <el-card shadow="never" class="chart-panel">
       <template #header>历史持仓金额变化</template>
       <BaseChart :option="positionValueOption" />
     </el-card>
+
     <el-tabs>
       <el-tab-pane label="年度表现">
         <el-table :data="performance.yearly">
@@ -239,7 +264,7 @@ function benchmarkCurve(annualReturn: number) {
           <el-table-column prop="start_net_value" label="期初净值" />
           <el-table-column prop="end_net_value" label="期末净值" />
           <el-table-column label="收益率">
-            <template #default="{ row }">{{ (Number(row.return) * 100).toFixed(2) }}%</template>
+            <template #default="{ row }">{{ percentFormatter(row.return) }}</template>
           </el-table-column>
         </el-table>
       </el-tab-pane>
@@ -249,7 +274,7 @@ function benchmarkCurve(annualReturn: number) {
           <el-table-column prop="start_net_value" label="期初净值" />
           <el-table-column prop="end_net_value" label="期末净值" />
           <el-table-column label="收益率">
-            <template #default="{ row }">{{ (Number(row.return) * 100).toFixed(2) }}%</template>
+            <template #default="{ row }">{{ percentFormatter(row.return) }}</template>
           </el-table-column>
         </el-table>
       </el-tab-pane>

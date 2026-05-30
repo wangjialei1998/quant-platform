@@ -140,6 +140,13 @@ export function getPositionValues(id: number) {
   return unwrap(http.get<{ dates: string[]; series: { name: string; data: number[] }[] }>(`/portfolios/${id}/position-values`))
 }
 
+export interface ReturnContributionPayload {
+  period: 'month' | 'year'
+  periods: string[]
+  symbols: string[]
+  series: { symbol: string; data: number[] }[]
+}
+
 export function getReturnContribution(id: number, period: 'month' | 'year') {
-  return unwrap(http.get<{ period: 'month' | 'year'; series: { symbol: string; contribution: number }[] }>(`/portfolios/${id}/return-contribution`, { params: { period } }))
+  return unwrap(http.get<ReturnContributionPayload>(`/portfolios/${id}/return-contribution`, { params: { period } }))
 }
