@@ -11,3 +11,9 @@ def next_trading_day(day: date) -> date:
         current += timedelta(days=1)
     return current
 
+
+def previous_trading_day(day: date) -> date:
+    current = day - timedelta(days=1)
+    while not is_trading_day(current):
+        current -= timedelta(days=1)
+    return current

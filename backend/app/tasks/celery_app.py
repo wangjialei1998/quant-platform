@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -25,4 +26,15 @@ celery_app.conf.task_routes = {
     "app.tasks.chart_tasks.*": {"queue": "chart"},
 }
 celery_app.conf.timezone = "Asia/Shanghai"
-
+celery_app.conf.beat_schedule = {
+    "daily-monitor-after-market-close": {
+        "task": "app.tasks.monitor_tasks.monitor_all_portfolios",
+        "schedule": crontab(hour=18, minute=0),
+        "options": {"queue": "monitor"},
+    },
+    "trading-day-morning-portfolio-reports": {
+        "task": "app.tasks.notification_tasks.send_previous_trading_day_reports",
+        "schedule": crontab(hour=8, minute=30),
+        "options": {"queue": "notification"},
+    },
+}

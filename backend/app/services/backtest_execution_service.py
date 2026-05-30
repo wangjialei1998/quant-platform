@@ -17,6 +17,7 @@ from app.models.signal import Signal
 from app.models.trade import CashFlow, Trade
 from app.services.market_data_service import MarketDataService
 from app.services.notification_service import NotificationService
+from app.services.portfolio_report_email_service import PortfolioReportEmailService
 from app.utils.time import utc_now
 from app.utils.trading_calendar import is_trading_day
 
@@ -269,6 +270,14 @@ class BacktestExecutionService:
         notification_ids = self._persist_trades_and_signals(portfolio, instrument_by_symbol, trades, run_id)
         self._persist_positions(portfolio, instrument_by_symbol, positions)
         self._persist_metrics(portfolio, equity_curve, [trade for trade in trades if trade.status == "filled"])
+        self.db.flush()
+        report_notification_id = PortfolioReportEmailService(self.db).create_report_notification(
+            portfolio,
+            run_id=run_id,
+            force=False,
+        )
+        if report_notification_id:
+            notification_ids.append(report_notification_id)
         return notification_ids
 
     def _persist_trades_and_signals(
@@ -278,7 +287,6 @@ class BacktestExecutionService:
         trades: list[SandboxTrade],
         run_id: int,
     ) -> list[int]:
-        notification_service = NotificationService(self.db)
         notification_ids: list[int] = []
         for item in trades:
             instrument = instrument_by_symbol.get(item.symbol)
@@ -298,7 +306,7 @@ class BacktestExecutionService:
             self.db.add(signal)
             self.db.flush()
 
-            if portfolio.email_enabled:
+            if False:
                 signal_title = f"{portfolio.name} {instrument.symbol} {item.side.upper()} 信号"
                 signal_content = "\n".join(
                     [
@@ -350,7 +358,7 @@ class BacktestExecutionService:
                         created_at=utc_now(),
                     )
                 )
-                if portfolio.email_enabled:
+                if False:
                     trade_title = f"{portfolio.name} {instrument.symbol} {item.side.upper()} 成交"
                     trade_content = "\n".join(
                         [
