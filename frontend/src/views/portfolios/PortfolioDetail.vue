@@ -50,13 +50,20 @@ const equityCurve = ref({
   benchmark: [] as number[],
   trades: [] as { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[],
 })
+const equityBenchmarks = [
+  { name: '沪深300', annualReturn: 0.08, color: '#64748b' },
+  { name: '中证500', annualReturn: 0.10, color: '#0f766e' },
+  { name: '纳斯达克', annualReturn: 0.12, color: '#9333ea' },
+  { name: '标普500', annualReturn: 0.10, color: '#ea580c' },
+  { name: '15%基准', annualReturn: 0.15, color: '#dc2626' },
+]
 const drawdown = ref({ dates: [] as string[], drawdown: [] as number[] })
-const benchmark = ref('')
 const emailEnabled = ref(false)
 
 const equityOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'axis' },
-  grid: { left: 48, right: 24, top: 36, bottom: 48 },
+  legend: { top: 0 },
+  grid: { left: 48, right: 24, top: 48, bottom: 48 },
   dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   xAxis: { type: 'category', data: equityCurve.value.dates },
   yAxis: { type: 'value' },
@@ -66,31 +73,16 @@ const equityOption = computed<EChartsOption>(() => ({
       type: 'line',
       smooth: true,
       data: equityCurve.value.portfolio,
-      markPoint: {
-        symbol: 'pin',
-        symbolSize: 46,
-        label: { color: '#fff', fontWeight: 'bold' },
-        data: (equityCurve.value.trades ?? [])
-          .filter((trade): trade is { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number } => trade.net_value !== null)
-          .map((trade) => ({
-            name: trade.side === 'buy' ? '买入' : '卖出',
-            coord: [trade.date, trade.net_value],
-            value: trade.side === 'buy' ? 'B' : 'S',
-            itemStyle: { color: trade.side === 'buy' ? '#16a34a' : '#dc2626' },
-          })),
-      },
     },
-    ...(benchmark.value
-      ? [
-          {
-            name: benchmark.value,
-            type: 'line' as const,
-            smooth: true,
-            lineStyle: { type: 'dashed' as const },
-            data: equityCurve.value.benchmark,
-          },
-        ]
-      : []),
+    ...equityBenchmarks.map((benchmark) => ({
+      name: benchmark.name,
+      type: 'line' as const,
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { type: 'dashed' as const, color: benchmark.color },
+      itemStyle: { color: benchmark.color },
+      data: benchmarkCurve(benchmark.annualReturn),
+    })),
   ],
 }))
 
@@ -164,7 +156,7 @@ async function load() {
 }
 
 async function loadEquityCurve() {
-  equityCurve.value = await getEquityCurve(portfolioId, benchmark.value ? '000300.SH' : undefined)
+  equityCurve.value = await getEquityCurve(portfolioId)
 }
 
 async function loadContribution() {
@@ -185,11 +177,14 @@ async function run() {
   ElMessage.success('组合更新任务已提交')
 }
 
-watch(benchmark, loadEquityCurve)
 watch(contributionPeriod, () => {
   if (!loadingContribution) loadContribution()
 })
 onMounted(load)
+
+function benchmarkCurve(annualReturn: number) {
+  return equityCurve.value.dates.map((_, index) => Number(((1 + annualReturn) ** (index / 252)).toFixed(6)))
+}
 </script>
 
 <template>
@@ -210,9 +205,6 @@ onMounted(load)
       <template #header>
         <div class="chart-header">
           <span>盈利曲线</span>
-          <el-select v-model="benchmark" clearable placeholder="选择对比基准" style="width: 180px">
-            <el-option label="沪深300" value="沪深300" />
-          </el-select>
         </div>
       </template>
       <BaseChart :option="equityOption" />

@@ -439,8 +439,10 @@ class BacktestExecutionService:
                 if len(daily_returns) > 1 and pstdev(daily_returns)
                 else 0.0
             )
-            profit_loss_ratio, win_rate = _trade_quality(filled_trades)
-            sqn = _sqn(filled_trades)
+            completed_trades = [trade for trade in filled_trades if trade.trade_date <= point.trade_date]
+            closed_trade_returns, closed_trade_pnls = _closed_trade_results(completed_trades)
+            profit_loss_ratio, win_rate = _trade_quality(closed_trade_pnls)
+            sqn = _sqn(closed_trade_returns)
             self.db.add(
                 PortfolioMetric(
                     portfolio_id=portfolio.id,
@@ -456,8 +458,8 @@ class BacktestExecutionService:
                     max_drawdown_days=max_drawdown_days,
                     volatility=volatility,
                     sqn=sqn,
-                    vwr=annual_return / abs(max_drawdown) if max_drawdown else 0.0,
-                    trade_count=len(filled_trades),
+                    vwr=_vwr(equity_curve[:index], annual_return),
+                    trade_count=len(completed_trades),
                     running_days=index,
                     created_at=utc_now(),
                 )
@@ -505,20 +507,67 @@ class BacktestExecutionService:
             NotificationService.enqueue([notification_id])
 
 
-def _trade_quality(trades: list[SandboxTrade]) -> tuple[float, float]:
-    sells = [float(item.net_amount - item.gross_amount) for item in trades if item.side == "sell"]
-    wins = [item for item in sells if item > 0]
-    losses = [abs(item) for item in sells if item < 0]
-    win_rate = len(wins) / len(sells) if sells else 0.0
+def _closed_trade_results(trades: list[SandboxTrade]) -> tuple[list[float], list[float]]:
+    positions: dict[str, dict[str, Decimal]] = {}
+    returns: list[float] = []
+    pnls: list[float] = []
+    for trade in sorted(trades, key=lambda item: (item.trade_date, item.symbol, item.side)):
+        if trade.status != "filled" or trade.quantity <= 0:
+            continue
+        position = positions.setdefault(trade.symbol, {"quantity": Decimal("0"), "cost": Decimal("0")})
+        if trade.side == "buy":
+            position["quantity"] += trade.quantity
+            position["cost"] += trade.net_amount
+            continue
+        if trade.side != "sell" or position["quantity"] <= 0 or position["cost"] <= 0:
+            continue
+
+        closed_quantity = min(trade.quantity, position["quantity"])
+        quantity_ratio = closed_quantity / position["quantity"]
+        sell_ratio = closed_quantity / trade.quantity
+        cost_basis = position["cost"] * quantity_ratio
+        proceeds = trade.net_amount * sell_ratio
+        pnl = proceeds - cost_basis
+        if cost_basis > 0:
+            returns.append(float(pnl / cost_basis))
+            pnls.append(float(pnl))
+        position["quantity"] -= closed_quantity
+        position["cost"] -= cost_basis
+        if position["quantity"] <= 0:
+            position["quantity"] = Decimal("0")
+            position["cost"] = Decimal("0")
+    return returns, pnls
+
+
+def _trade_quality(pnls: list[float]) -> tuple[float, float]:
+    wins = [item for item in pnls if item > 0]
+    losses = [abs(item) for item in pnls if item < 0]
+    win_rate = len(wins) / len(pnls) if pnls else 0.0
     profit_loss_ratio = (mean(wins) / mean(losses)) if wins and losses else 0.0
     return profit_loss_ratio, win_rate
 
 
-def _sqn(trades: list[SandboxTrade]) -> float:
-    if len(trades) < 2:
+def _sqn(returns: list[float]) -> float:
+    if len(returns) < 2:
         return 0.0
-    returns = [float(item.net_amount / item.gross_amount) if item.gross_amount else 0.0 for item in trades]
     deviation = pstdev(returns)
     if not deviation:
         return 0.0
     return (len(returns) ** 0.5) * mean(returns) / deviation
+
+
+def _vwr(equity_curve: list[SandboxEquity], annual_return: float) -> float:
+    if len(equity_curve) < 2:
+        return annual_return
+    values = [float(point.total_asset) for point in equity_curve if point.total_asset > 0]
+    if len(values) < 2 or values[0] <= 0 or values[-1] <= 0:
+        return 0.0
+    growth = (values[-1] / values[0]) ** (1 / (len(values) - 1))
+    deviations = []
+    for index, value in enumerate(values):
+        expected = values[0] * (growth**index)
+        if expected > 0:
+            deviations.append(value / expected - 1)
+    variability = pstdev(deviations) if len(deviations) > 1 else 0.0
+    penalty = max(0.0, 1 - (variability / 2.0) ** 0.20)
+    return annual_return * penalty

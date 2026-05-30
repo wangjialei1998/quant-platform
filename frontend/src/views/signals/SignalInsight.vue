@@ -45,10 +45,11 @@ const showSignals = ref(true)
 
 const priceChartOption = computed<EChartsOption>(() => {
   const series: SeriesOption[] = priceChart.value.series.map((item) => {
+    const data = chartSeriesData(item)
     const points = priceChart.value.signals
       .filter((signal) => showSignals.value && signal.symbol === item.name)
       .map((signal) => {
-        const y = findSignalY(item, signal.date)
+        const y = findSignalY(data, signal.date)
         if (y === null) return null
         return {
           name: signal.side === 'buy' ? '买入' : '卖出',
@@ -64,7 +65,7 @@ const priceChartOption = computed<EChartsOption>(() => {
       type: 'line',
       smooth: true,
       symbol: 'none',
-      data: item.data,
+      data,
       markPoint: showSignals.value
         ? {
             symbol: 'pin',
@@ -151,8 +152,15 @@ const annualVolatilityOption = computed<EChartsOption>(() => ({
   ],
 }))
 
-function findSignalY(series: PriceSeries, date: string) {
-  return series.data.find((point) => point[0] === date)?.[1] ?? null
+function findSignalY(series: [string, number][], date: string) {
+  return series.find((point) => point[0] === date)?.[1] ?? null
+}
+
+function chartSeriesData(series: PriceSeries) {
+  if (!normalized.value) return series.data
+  const firstValue = series.data.find((point) => point[1] > 0)?.[1]
+  if (!firstValue) return series.data
+  return series.data.map((point) => [point[0], Number(((point[1] / firstValue) * 100).toFixed(4))] as [string, number])
 }
 
 function formatPercent(value?: number) {
@@ -174,7 +182,6 @@ async function load() {
   risks.value = await getSignalRisks(portfolioId)
 }
 
-watch(normalized, load)
 onMounted(load)
 </script>
 
