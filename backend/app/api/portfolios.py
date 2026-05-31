@@ -556,12 +556,12 @@ def _benchmark_curve(db: Session, rows: list[PortfolioMetric], benchmark_symbol:
 
     start_date: date = rows[0].metric_date
     end_date: date = rows[-1].metric_date
-    normalized_symbol = "000300.SH" if benchmark_symbol in {"沪深300", "HS300", "CSI300"} else benchmark_symbol
+    normalized_symbol, benchmark_name = _benchmark_identity(benchmark_symbol)
     try:
         instrument = InstrumentService(db).create(
             InstrumentCreate(
                 symbol=normalized_symbol,
-                name="沪深300" if normalized_symbol in {"000300", "000300.SH"} else None,
+                name=benchmark_name,
                 instrument_type="index",
                 exchange="SSE",
             )
@@ -572,7 +572,7 @@ def _benchmark_curve(db: Session, rows: list[PortfolioMetric], benchmark_symbol:
         db.rollback()
         instrument = (
             db.query(Instrument)
-            .filter(Instrument.symbol.in_([normalized_symbol, "000300.SH"]))
+            .filter(Instrument.symbol == normalized_symbol)
             .first()
         )
         if not instrument:
@@ -607,3 +607,18 @@ def _benchmark_curve(db: Session, rows: list[PortfolioMetric], benchmark_symbol:
         else:
             curve.append(None)
     return curve
+
+
+def _benchmark_identity(benchmark_symbol: str) -> tuple[str, str]:
+    benchmark_map = {
+        "沪深300": ("000300.SH", "沪深300"),
+        "HS300": ("000300.SH", "沪深300"),
+        "CSI300": ("000300.SH", "沪深300"),
+        "000300": ("000300.SH", "沪深300"),
+        "000300.SH": ("000300.SH", "沪深300"),
+        "中证500": ("000905.SH", "中证500"),
+        "CSI500": ("000905.SH", "中证500"),
+        "000905": ("000905.SH", "中证500"),
+        "000905.SH": ("000905.SH", "中证500"),
+    }
+    return benchmark_map.get(benchmark_symbol, (benchmark_symbol, benchmark_symbol))

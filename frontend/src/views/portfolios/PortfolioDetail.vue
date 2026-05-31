@@ -53,16 +53,15 @@ const taskId = ref('')
 const equityCurve = ref({
   dates: [] as string[],
   portfolio: [] as number[],
-  benchmark: [] as number[],
+  benchmark: [] as (number | null)[],
   trades: [] as { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[],
 })
 const equityBenchmarks = [
-  { name: '沪深300', annualReturn: 0.08, color: '#64748b' },
-  { name: '中证500', annualReturn: 0.10, color: '#0f766e' },
-  { name: '纳斯达克', annualReturn: 0.12, color: '#9333ea' },
-  { name: '标普500', annualReturn: 0.10, color: '#ea580c' },
-  { name: '15%基准', annualReturn: 0.15, color: '#dc2626' },
+  { name: '沪深300', symbol: '000300.SH', color: '#64748b' },
+  { name: '中证500', symbol: '000905.SH', color: '#0f766e' },
 ]
+const benchmarkCurves = ref<Record<string, (number | null)[]>>({})
+const fixedBenchmarks = [{ name: '15%基准', annualReturn: 0.15, color: '#dc2626' }]
 const drawdown = ref({ dates: [] as string[], drawdown: [] as number[] })
 const emailEnabled = ref(false)
 
@@ -92,7 +91,16 @@ const equityOption = computed<EChartsOption>(() => ({
       symbol: 'none',
       lineStyle: { type: 'dashed' as const, color: benchmark.color },
       itemStyle: { color: benchmark.color },
-      data: benchmarkCurve(benchmark.annualReturn),
+      data: benchmarkCurves.value[benchmark.symbol] ?? [],
+    })),
+    ...fixedBenchmarks.map((benchmark) => ({
+      name: benchmark.name,
+      type: 'line' as const,
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { type: 'dashed' as const, color: benchmark.color },
+      itemStyle: { color: benchmark.color },
+      data: fixedBenchmarkCurve(benchmark.annualReturn),
     })),
   ],
 }))
@@ -170,6 +178,15 @@ async function load() {
 
 async function loadEquityCurve() {
   equityCurve.value = await getEquityCurve(portfolioId)
+  const benchmarkResponses = await Promise.all(
+    equityBenchmarks.map(async (benchmark) => ({
+      symbol: benchmark.symbol,
+      payload: await getEquityCurve(portfolioId, benchmark.symbol),
+    })),
+  )
+  benchmarkCurves.value = Object.fromEntries(
+    benchmarkResponses.map((item) => [item.symbol, item.payload.benchmark]),
+  )
 }
 
 async function loadInstrumentContribution() {
@@ -191,7 +208,7 @@ async function run() {
 watch(instrumentContributionPeriod, loadInstrumentContribution)
 onMounted(load)
 
-function benchmarkCurve(annualReturn: number) {
+function fixedBenchmarkCurve(annualReturn: number) {
   return equityCurve.value.dates.map((_, index) => Number(((1 + annualReturn) ** (index / 252)).toFixed(6)))
 }
 

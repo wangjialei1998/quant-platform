@@ -94,7 +94,7 @@ export function updatePortfolioEmail(id: number, emailEnabled: boolean) {
 export interface EquityCurvePayload {
   dates: string[]
   portfolio: number[]
-  benchmark: number[]
+  benchmark: (number | null)[]
   trades: { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[]
 }
 
