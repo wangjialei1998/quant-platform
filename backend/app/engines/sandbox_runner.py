@@ -230,6 +230,7 @@ def instrument_strategy(strategy_cls, portfolio):
             self._position_costs = {}
             self._last_buy_date = {}
             self._order_signal_dates = {}
+            self._last_snapshot_date = None
 
         def notify_order(self, order):
             super_notify = getattr(super(), "notify_order", None)
@@ -306,13 +307,13 @@ def instrument_strategy(strategy_cls, portfolio):
             self._record_snapshot()
 
         def _capture_signal_dates(self):
-            current_date = data_date(self.datas[0])
+            current_date = strategy_date(self)
             for order in list(getattr(self, "_orderspending", [])):
                 if order.ref not in self._order_signal_dates:
                     self._order_signal_dates[order.ref] = current_date
 
         def _enforce_lot_size_and_t1(self):
-            current_date = data_date(self.datas[0])
+            current_date = strategy_date(self)
             for order in list(getattr(self, "_orderspending", [])):
                 if order.status not in (order.Created, order.Submitted, order.Accepted):
                     continue
@@ -360,7 +361,10 @@ def instrument_strategy(strategy_cls, portfolio):
         def _record_snapshot(self):
             if not self.datas:
                 return
-            current_date = data_date(self.datas[0])
+            current_date = strategy_date(self)
+            if self._last_snapshot_date == current_date:
+                return
+            self._last_snapshot_date = current_date
             cash = decimal(self.broker.getcash(), "0.01")
             total_asset = decimal(self.broker.getvalue(), "0.01")
             position_value = decimal(total_asset - cash, "0.01")
@@ -399,6 +403,10 @@ def instrument_strategy(strategy_cls, portfolio):
 
 def data_date(data):
     return bt.num2date(data.datetime[0]).date()
+
+
+def strategy_date(strategy):
+    return bt.num2date(strategy.datetime[0]).date()
 
 
 def decimal(value, quant):

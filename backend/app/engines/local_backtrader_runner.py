@@ -170,6 +170,7 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
             self._position_costs: dict[str, Decimal] = {}
             self._last_buy_date: dict[str, date] = {}
             self._order_signal_dates: dict[int, date] = {}
+            self._last_snapshot_date: date | None = None
 
         def notify_order(self, order):
             super_notify = getattr(super(), "notify_order", None)
@@ -246,13 +247,13 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
             self._record_daily_snapshot()
 
         def _capture_signal_dates(self):
-            current_date = _data_date(self.datas[0])
+            current_date = _strategy_date(self)
             for order in list(getattr(self, "_orderspending", [])):
                 if order.ref not in self._order_signal_dates:
                     self._order_signal_dates[order.ref] = current_date
 
         def _enforce_lot_size_and_t1(self):
-            current_date = _data_date(self.datas[0])
+            current_date = _strategy_date(self)
             for order in list(getattr(self, "_orderspending", [])):
                 if order.status not in (order.Created, order.Submitted, order.Accepted):
                     continue
@@ -299,7 +300,10 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
         def _record_daily_snapshot(self):
             if not self.datas:
                 return
-            current_date = _data_date(self.datas[0])
+            current_date = _strategy_date(self)
+            if self._last_snapshot_date == current_date:
+                return
+            self._last_snapshot_date = current_date
             cash = Decimal(str(self.broker.getcash())).quantize(Decimal("0.01"))
             total_asset = Decimal(str(self.broker.getvalue())).quantize(Decimal("0.01"))
             position_value = (total_asset - cash).quantize(Decimal("0.01"))
@@ -340,3 +344,7 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
 
 def _data_date(data) -> date:
     return bt.num2date(data.datetime[0]).date()
+
+
+def _strategy_date(strategy) -> date:
+    return bt.num2date(strategy.datetime[0]).date()
