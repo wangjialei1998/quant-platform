@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -36,6 +36,7 @@ class PortfolioInstrument(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     portfolio_id: Mapped[int] = mapped_column(ForeignKey("portfolios.id"), nullable=False)
     instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     portfolio = relationship("Portfolio", back_populates="instruments")
     instrument = relationship("Instrument")
@@ -56,4 +57,3 @@ class PortfolioPosition(Base):
     cost_amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     market_value: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
     weight: Mapped[float] = mapped_column(default=0.0, nullable=False)
-

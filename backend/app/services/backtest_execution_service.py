@@ -129,7 +129,7 @@ class BacktestExecutionService:
             self.db.query(Instrument)
             .join(PortfolioInstrument, PortfolioInstrument.instrument_id == Instrument.id)
             .filter(PortfolioInstrument.portfolio_id == portfolio_id, Instrument.is_active.is_(True))
-            .order_by(Instrument.symbol)
+            .order_by(PortfolioInstrument.sort_order, PortfolioInstrument.id)
             .all()
         )
 

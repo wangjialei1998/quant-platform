@@ -40,10 +40,11 @@ class PortfolioService:
         )
         self.db.add(portfolio)
         self.db.flush()
-        for instrument_id in instrument_ids:
+        for sort_order, instrument_id in enumerate(instrument_ids):
             portfolio_instrument = PortfolioInstrument(
                 portfolio_id=portfolio.id,
                 instrument_id=instrument_id,
+                sort_order=sort_order,
             )
             self.db.add(portfolio_instrument)
         self.db.commit()
@@ -79,8 +80,14 @@ class PortfolioService:
 
         self._clear_derived_outputs(portfolio_id)
         self.db.execute(delete(PortfolioInstrument).where(PortfolioInstrument.portfolio_id == portfolio_id))
-        for instrument_id in instrument_ids:
-            self.db.add(PortfolioInstrument(portfolio_id=portfolio_id, instrument_id=instrument_id))
+        for sort_order, instrument_id in enumerate(instrument_ids):
+            self.db.add(
+                PortfolioInstrument(
+                    portfolio_id=portfolio_id,
+                    instrument_id=instrument_id,
+                    sort_order=sort_order,
+                )
+            )
         self.db.commit()
         self.db.refresh(portfolio)
         return portfolio

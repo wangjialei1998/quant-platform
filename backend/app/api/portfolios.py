@@ -101,7 +101,7 @@ def get_portfolio_edit(portfolio_id: int, db: Session = Depends(get_db)) -> dict
         row.instrument_id
         for row in db.query(PortfolioInstrument.instrument_id)
         .filter(PortfolioInstrument.portfolio_id == portfolio_id)
-        .order_by(PortfolioInstrument.instrument_id)
+        .order_by(PortfolioInstrument.sort_order, PortfolioInstrument.id)
         .all()
     ]
     return {
@@ -384,7 +384,7 @@ def get_return_contribution(portfolio_id: int, period: str = "month", db: Sessio
         db.query(Instrument)
         .join(PortfolioInstrument, PortfolioInstrument.instrument_id == Instrument.id)
         .filter(PortfolioInstrument.portfolio_id == portfolio_id)
-        .order_by(Instrument.symbol)
+        .order_by(PortfolioInstrument.sort_order, PortfolioInstrument.id)
         .all()
     )
     metrics = (
