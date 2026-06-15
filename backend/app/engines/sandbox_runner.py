@@ -33,9 +33,9 @@ class SandboxRunner:
                     "instruments": [{"id": 1, "symbol": "TEST.SZ"}],
                     "bars": {
                         "1": [
-                            {"trade_date": "2024-01-02", "open": "10", "high": "10.3", "low": "9.9", "close": "10.1", "volume": "100000"},
-                            {"trade_date": "2024-01-03", "open": "10.1", "high": "10.4", "low": "10.0", "close": "10.2", "volume": "100000"},
-                            {"trade_date": "2024-01-04", "open": "10.2", "high": "10.5", "low": "10.1", "close": "10.3", "volume": "100000"},
+                            {"trade_date": "2024-01-02", "open": "10", "high": "10.3", "low": "9.9", "close": "10.1", "volume": "100000", "amount": "1010000"},
+                            {"trade_date": "2024-01-03", "open": "10.1", "high": "10.4", "low": "10.0", "close": "10.2", "volume": "100000", "amount": "1020000"},
+                            {"trade_date": "2024-01-04", "open": "10.2", "high": "10.5", "low": "10.1", "close": "10.3", "volume": "100000", "amount": "1030000"},
                         ]
                     },
                 },
@@ -150,6 +150,11 @@ import backtrader as bt
 import pandas as pd
 
 
+class AmountPandasData(bt.feeds.PandasData):
+    lines = ("amount",)
+    params = (("amount", -1),)
+
+
 def main():
     input_path, strategy_path, output_path = sys.argv[1:4]
     payload = json.loads(open(input_path, encoding="utf-8").read())
@@ -185,8 +190,9 @@ def run(payload, strategy_path):
                 # TickFlow A-share daily bars expose OHLC fields; for stocks/ETFs
                 # this system uses close as the daily settlement-equivalent price
                 # for signal calculation and equity marking.
-                "close": float(row["close"]),
+                    "close": float(row["close"]),
                     "volume": float(row.get("volume") or 0),
+                    "amount": float(row.get("amount") or 0),
                     "openinterest": 0,
                 }
                 for row in rows
@@ -194,7 +200,7 @@ def run(payload, strategy_path):
         )
         frame["datetime"] = pd.to_datetime(frame["datetime"])
         frame = frame.set_index("datetime")
-        cerebro.adddata(bt.feeds.PandasData(dataname=frame), name=instrument["symbol"])
+        cerebro.adddata(AmountPandasData(dataname=frame), name=instrument["symbol"])
 
     cerebro.addstrategy(audit_cls)
     strategies = cerebro.run(runonce=False)

@@ -194,6 +194,7 @@ class BacktestExecutionService:
                         "low": str(row.low),
                         "close": str(row.close),
                         "volume": str(row.volume or 0),
+                        "amount": str(row.amount or 0),
                     }
                     for row in rows
                 ]

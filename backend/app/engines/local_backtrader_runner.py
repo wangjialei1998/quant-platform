@@ -22,6 +22,11 @@ from app.models.portfolio import Portfolio
 from app.utils.trading_calendar import next_trading_day
 
 
+class AmountPandasData(bt.feeds.PandasData):
+    lines = ("amount",)
+    params = (("amount", -1),)
+
+
 @dataclass(frozen=True)
 class EngineTrade:
     symbol: str
@@ -123,6 +128,7 @@ def _daily_feed(rows: list[MarketDailyBar]) -> bt.feeds.PandasData:
                 "low": float(row.low),
                 "close": float(row.close),
                 "volume": float(row.volume or 0),
+                "amount": float(row.amount or 0),
                 "openinterest": 0.0,
             }
             for row in rows
@@ -130,7 +136,7 @@ def _daily_feed(rows: list[MarketDailyBar]) -> bt.feeds.PandasData:
     )
     frame["datetime"] = pd.to_datetime(frame["datetime"])
     frame = frame.set_index("datetime")
-    return bt.feeds.PandasData(dataname=frame)
+    return AmountPandasData(dataname=frame)
 
 
 def _load_strategy_class(code_path: str) -> type[bt.Strategy]:
