@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.integrations.tickflow_client import TickFlowClient
 from app.models.instrument import Instrument
 from app.models.market_data import MarketDailyBar
+from app.utils.trading_calendar import next_or_same_trading_day, previous_or_same_trading_day, trading_day_count
 
 
 class MarketDataService:
@@ -58,17 +59,31 @@ class MarketDataService:
         adjustment_type: str = "none",
     ) -> dict:
         synced: list[dict] = []
+        sync_start_date = next_or_same_trading_day(start_date)
+        sync_end_date = previous_or_same_trading_day(end_date)
         for instrument in instruments:
-            existing_dates = self._existing_dates(instrument.id, start_date, end_date, adjustment_type)
+            if sync_start_date > sync_end_date:
+                existing_dates = self._existing_dates(instrument.id, start_date, end_date, adjustment_type)
+                synced.append(
+                    {
+                        "instrument_id": instrument.id,
+                        "symbol": instrument.symbol,
+                        "fetched": 0,
+                        "cached": len(existing_dates),
+                    }
+                )
+                continue
+
+            existing_dates = self._existing_dates(instrument.id, sync_start_date, sync_end_date, adjustment_type)
             if existing_dates:
-                missing_start = start_date if min(existing_dates) > start_date else None
-                missing_end = end_date if max(existing_dates) < end_date else None
+                missing_start = sync_start_date if min(existing_dates) > sync_start_date else None
+                missing_end = sync_end_date if max(existing_dates) < sync_end_date else None
                 cached_start = min(existing_dates)
                 cached_end = max(existing_dates)
                 full_span_cached = (
-                    cached_start <= start_date
-                    and cached_end >= end_date
-                    and len(existing_dates) >= _business_day_count(start_date, end_date) * 0.6
+                    cached_start <= sync_start_date
+                    and cached_end >= sync_end_date
+                    and len(existing_dates) >= trading_day_count(sync_start_date, sync_end_date) * 0.6
                 )
                 if missing_start is None and missing_end is None and full_span_cached:
                     synced.append(
@@ -81,7 +96,7 @@ class MarketDataService:
                     )
                     continue
 
-            fetched = self.tickflow_client.fetch_daily_bars(instrument.symbol, start_date, end_date)
+            fetched = self.tickflow_client.fetch_daily_bars(instrument.symbol, sync_start_date, sync_end_date)
             saved = self._upsert_bars(instrument, fetched, adjustment_type)
             synced.append(
                 {
@@ -160,13 +175,3 @@ class MarketDataService:
                 )
             saved += 1
         return saved
-
-
-def _business_day_count(start_date: date, end_date: date) -> int:
-    current = start_date
-    count = 0
-    while current <= end_date:
-        if current.weekday() < 5:
-            count += 1
-        current += timedelta(days=1)
-    return count

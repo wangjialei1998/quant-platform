@@ -19,7 +19,7 @@ from app.services.market_data_service import MarketDataService
 from app.services.notification_service import NotificationService
 from app.services.portfolio_report_email_service import PortfolioReportEmailService
 from app.utils.time import utc_now
-from app.utils.trading_calendar import is_trading_day
+from app.utils.trading_calendar import previous_or_same_trading_day
 
 
 @dataclass(frozen=True)
@@ -137,11 +137,7 @@ class BacktestExecutionService:
         current = date.today()
         if current < start_date:
             current = start_date
-        while not is_trading_day(current):
-            from datetime import timedelta
-
-            current -= timedelta(days=1)
-        return current
+        return previous_or_same_trading_day(current)
 
     def _bars_by_instrument(
         self,
