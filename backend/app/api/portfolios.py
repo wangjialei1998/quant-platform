@@ -20,7 +20,7 @@ from app.services.instrument_service import InstrumentService
 from app.services.market_data_service import MarketDataService
 from app.services.portfolio_service import PortfolioService
 from app.tasks.backtest_tasks import initialize_portfolio
-from app.tasks.monitor_tasks import monitor_portfolio
+from app.tasks.monitor_tasks import sync_and_monitor_portfolio
 from app.utils.errors import NotFoundError, ValidationError
 
 router = APIRouter()
@@ -160,7 +160,7 @@ def resume_portfolio(portfolio_id: int, db: Session = Depends(get_db)) -> Portfo
 def run_portfolio(portfolio_id: int, db: Session = Depends(get_db)) -> TaskResponse:
     if not db.get(Portfolio, portfolio_id):
         raise HTTPException(status_code=404, detail="Portfolio not found")
-    task = monitor_portfolio.delay(portfolio_id, "manual_monitor")
+    task = sync_and_monitor_portfolio.delay(portfolio_id, "manual_monitor")
     return TaskResponse(task_id=task.id)
 
 

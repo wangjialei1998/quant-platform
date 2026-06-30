@@ -2,13 +2,20 @@
 import { Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { onMounted, ref } from 'vue'
-import { deleteMarketDailyBars, getMarketDailyBars, getMarketDataRanges } from '@/api/marketData'
+import {
+  deleteMarketDailyBars,
+  getMarketDailyBars,
+  getMarketDataRanges,
+  syncMarketDataCacheToToday,
+} from '@/api/marketData'
+import TaskStatus from '@/components/common/TaskStatus.vue'
 
 const loading = ref(false)
 const ranges = ref<Record<string, unknown>[]>([])
 const bars = ref<Record<string, unknown>[]>([])
 const selectedRange = ref<Record<string, unknown> | null>(null)
 const queryRange = ref<[string, string] | null>(null)
+const syncTaskId = ref('')
 
 async function load() {
   loading.value = true
@@ -42,6 +49,12 @@ async function viewBars(row: Record<string, unknown>) {
   })) as Record<string, unknown>[]
 }
 
+async function syncCache() {
+  const response = await syncMarketDataCacheToToday()
+  syncTaskId.value = response.task_id
+  ElMessage.success('行情缓存同步任务已提交')
+}
+
 onMounted(load)
 </script>
 
@@ -49,8 +62,12 @@ onMounted(load)
   <section class="page">
     <div class="page-header">
       <h1 class="page-title">行情缓存管理</h1>
-      <el-button :icon="Refresh" @click="load">刷新</el-button>
+      <div class="toolbar">
+        <el-button type="primary" :icon="Refresh" @click="syncCache">同步到今日</el-button>
+        <el-button :icon="Refresh" @click="load">刷新</el-button>
+      </div>
     </div>
+    <TaskStatus :task-id="syncTaskId" />
     <el-card shadow="never">
       <el-table v-loading="loading" :data="ranges">
         <el-table-column prop="symbol" label="代码" width="140" />

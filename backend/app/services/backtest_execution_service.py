@@ -65,7 +65,12 @@ class BacktestExecutionService:
     def __init__(self, db: Session):
         self.db = db
 
-    def initialize_portfolio(self, portfolio_id: int, run_type: str = "initial_backtest") -> dict:
+    def initialize_portfolio(
+        self,
+        portfolio_id: int,
+        run_type: str = "initial_backtest",
+        sync_market_data: bool = True,
+    ) -> dict:
         portfolio = self.db.get(Portfolio, portfolio_id)
         if not portfolio:
             return {"status": "failed", "message": "Portfolio not found"}
@@ -91,7 +96,13 @@ class BacktestExecutionService:
                 raise RuntimeError("Portfolio has no instruments")
 
             end_date = run.end_date or self._latest_trading_date(portfolio.start_date)
-            MarketDataService(self.db).ensure_daily_bars(instruments, portfolio.start_date, end_date)
+            if sync_market_data:
+                MarketDataService(self.db).ensure_daily_bars(
+                    instruments,
+                    portfolio.start_date,
+                    end_date,
+                    retry_on_rate_limit=True,
+                )
             bars_by_instrument = self._bars_by_instrument(instruments, portfolio.start_date, end_date)
             self._assert_complete_bars(instruments, bars_by_instrument)
 

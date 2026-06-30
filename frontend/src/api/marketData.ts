@@ -11,3 +11,7 @@ export function getMarketDailyBars(params: Record<string, unknown>) {
 export function deleteMarketDailyBars(params: Record<string, unknown>) {
   return unwrap(http.delete('/market-data/bars', { params }))
 }
+
+export function syncMarketDataCacheToToday() {
+  return unwrap(http.post<{ task_id: string; status: string }>('/market-data/sync-cache'))
+}

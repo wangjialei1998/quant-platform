@@ -1,3 +1,6 @@
+import logging
+import random
+import time
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -7,6 +10,21 @@ from app.integrations.tickflow_client import TickFlowClient
 from app.models.instrument import Instrument
 from app.models.market_data import MarketDailyBar
 from app.utils.trading_calendar import next_or_same_trading_day, previous_or_same_trading_day, trading_day_count
+
+logger = logging.getLogger(__name__)
+
+RATE_LIMIT_KEYWORDS = (
+    "429",
+    "too many requests",
+    "rate limit",
+    "ratelimit",
+    "quota",
+    "frequency",
+    "请求频率",
+    "频率",
+    "超限",
+    "限流",
+)
 
 
 class MarketDataService:
@@ -57,6 +75,7 @@ class MarketDataService:
         start_date: date,
         end_date: date,
         adjustment_type: str = "none",
+        retry_on_rate_limit: bool = False,
     ) -> dict:
         synced: list[dict] = []
         sync_start_date = next_or_same_trading_day(start_date)
@@ -96,7 +115,12 @@ class MarketDataService:
                     )
                     continue
 
-            fetched = self.tickflow_client.fetch_daily_bars(instrument.symbol, sync_start_date, sync_end_date)
+            fetched = self._fetch_daily_bars(
+                instrument,
+                sync_start_date,
+                sync_end_date,
+                retry_on_rate_limit=retry_on_rate_limit,
+            )
             saved = self._upsert_bars(instrument, fetched, adjustment_type)
             synced.append(
                 {
@@ -110,6 +134,29 @@ class MarketDataService:
                 raise RuntimeError(f"No daily bars returned for {instrument.symbol} from TickFlow")
         self.db.flush()
         return {"status": "success", "items": synced}
+
+    def _fetch_daily_bars(
+        self,
+        instrument: Instrument,
+        start_date: date,
+        end_date: date,
+        retry_on_rate_limit: bool,
+    ) -> list[dict]:
+        while True:
+            try:
+                return self.tickflow_client.fetch_daily_bars(instrument.symbol, start_date, end_date)
+            except Exception as exc:
+                if not retry_on_rate_limit or not _is_rate_limit_error(exc):
+                    raise
+                delay = random.randint(60, 120)
+                logger.warning(
+                    "TickFlow rate limit when syncing %s from %s to %s; retry after %s seconds",
+                    instrument.symbol,
+                    start_date,
+                    end_date,
+                    delay,
+                )
+                time.sleep(delay)
 
     def _existing_dates(
         self,
@@ -175,3 +222,8 @@ class MarketDataService:
                 )
             saved += 1
         return saved
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(keyword in message for keyword in RATE_LIMIT_KEYWORDS)

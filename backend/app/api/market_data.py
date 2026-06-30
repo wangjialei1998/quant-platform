@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.market_data import MarketDailyBar
+from app.schemas.common import TaskResponse
 from app.schemas.market_data import MarketDailyBarRead, MarketDataRangeRead
 from app.services.market_data_service import MarketDataService
+from app.tasks.market_data_tasks import sync_cached_market_data_to_today
 
 router = APIRouter()
 
@@ -36,3 +38,8 @@ def delete_bars(instrument_id: int, start_date: date, end_date: date, db: Sessio
     deleted = MarketDataService(db).delete_bars(instrument_id, start_date, end_date)
     return {"message": "ok", "deleted": deleted}
 
+
+@router.post("/sync-cache", response_model=TaskResponse)
+def sync_cache_to_today() -> TaskResponse:
+    task = sync_cached_market_data_to_today.delay()
+    return TaskResponse(task_id=task.id)

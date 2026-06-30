@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { getTaskStatus } from '@/api/tasks'
 
 const props = defineProps<{ taskId?: string }>()
 const status = ref('')
 const result = ref<unknown>(null)
 let timer: number | undefined
+
+const formattedResult = computed(() => {
+  if (result.value === null || result.value === undefined) return ''
+  if (typeof result.value === 'string') return result.value
+  return JSON.stringify(result.value, null, 2)
+})
 
 async function refresh() {
   if (!props.taskId) return
@@ -39,7 +45,7 @@ onBeforeUnmount(() => window.clearInterval(timer))
     <template #title>
       任务 {{ taskId }}：{{ status || 'pending' }}
     </template>
-    <pre v-if="result" class="task-result">{{ result }}</pre>
+    <pre v-if="formattedResult" class="task-result">{{ formattedResult }}</pre>
   </el-alert>
 </template>
 
@@ -51,4 +57,3 @@ onBeforeUnmount(() => window.clearInterval(timer))
   white-space: pre-wrap;
 }
 </style>
-

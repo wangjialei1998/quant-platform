@@ -1,12 +1,15 @@
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from app.core.database import SessionLocal
 from app.models.instrument import Instrument
 from app.models.log import SystemLog
 from app.models.notification import Notification
 from app.services.market_data_service import MarketDataService
+from app.services.market_data_sync_service import MarketDataSyncService
 from app.tasks.celery_app import celery_app
 from app.utils.time import utc_now
+from app.utils.trading_calendar import is_trading_day
 
 
 @celery_app.task(name="app.tasks.market_data_tasks.sync_market_data")
@@ -18,6 +21,7 @@ def sync_market_data(instrument_ids: list[int], start_date: str, end_date: str) 
             instruments,
             date.fromisoformat(start_date),
             date.fromisoformat(end_date),
+            retry_on_rate_limit=True,
         )
         db.commit()
         return {
@@ -60,3 +64,53 @@ def sync_market_data(instrument_ids: list[int], start_date: str, end_date: str) 
         return {"status": "failed", "message": str(exc)}
     finally:
         db.close()
+
+
+@celery_app.task(name="app.tasks.market_data_tasks.sync_running_portfolio_market_data")
+def sync_running_portfolio_market_data(run_monitors: bool = False) -> dict:
+    today = _today()
+    if not is_trading_day(today):
+        return {
+            "status": "skipped",
+            "message": "today is not a trading day; no market data sync needed",
+            "date": today.isoformat(),
+        }
+
+    db = SessionLocal()
+    try:
+        result = MarketDataSyncService(db).sync_running_portfolio_bars(today, retry_on_rate_limit=True)
+        if run_monitors:
+            from app.tasks.monitor_tasks import monitor_all_portfolios
+
+            monitor_task = monitor_all_portfolios.delay(False)
+            result["monitor_task_id"] = monitor_task.id
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.tasks.market_data_tasks.sync_cached_market_data_to_today")
+def sync_cached_market_data_to_today() -> dict:
+    today = _today()
+    if not is_trading_day(today):
+        return {
+            "status": "skipped",
+            "message": "today is not a trading day; cache is already up to the latest trading day",
+            "date": today.isoformat(),
+        }
+
+    db = SessionLocal()
+    try:
+        return MarketDataSyncService(db).sync_cached_bars(today, retry_on_rate_limit=True)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _today() -> date:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date()
