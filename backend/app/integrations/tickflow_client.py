@@ -60,20 +60,18 @@ class TickFlowClient:
         except ImportError as exc:
             raise RuntimeError("TickFlow SDK is not installed. Rebuild the backend image after updating requirements.") from exc
 
-        if settings.tickflow_api_key:
-            for factory in (
-                lambda: TickFlow(api_key=settings.tickflow_api_key),
-                lambda: TickFlow(token=settings.tickflow_api_key),
-                lambda: TickFlow.pro(settings.tickflow_api_key),
-            ):
-                try:
-                    return factory()
-                except Exception:
-                    continue
-        try:
-            return TickFlow.free()
-        except Exception as exc:
-            raise RuntimeError(f"TickFlow free client initialization failed: {exc}") from exc
+        if not settings.tickflow_api_key:
+            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow market data access.")
+        for factory in (
+            lambda: TickFlow(api_key=settings.tickflow_api_key),
+            lambda: TickFlow(token=settings.tickflow_api_key),
+            lambda: TickFlow.pro(settings.tickflow_api_key),
+        ):
+            try:
+                return factory()
+            except Exception:
+                continue
+        raise RuntimeError("TickFlow API-key client initialization failed.")
 
 
 def normalize_symbol(symbol: str) -> str:

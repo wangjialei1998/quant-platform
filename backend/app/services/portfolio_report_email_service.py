@@ -367,9 +367,9 @@ class PortfolioReportEmailService:
 <body style="margin:0;background:#eef2f7;font-family:Arial,'Microsoft YaHei',sans-serif;color:#172033;">
   <div style="max-width:980px;margin:0 auto;padding:28px 18px;">
     <div style="background:#111827;border-radius:14px;padding:26px 28px;color:#fff;">
-      <div style="font-size:13px;letter-spacing:0;color:#93c5fd;">交易日早盘日报</div>
+      <div style="font-size:13px;letter-spacing:0;color:#93c5fd;">交易日回测日报</div>
       <h1 style="margin:8px 0 10px;font-size:26px;line-height:1.3;">{escape(portfolio.name)} 组合日报</h1>
-      <div style="font-size:14px;color:#d1d5db;">报告日期：{report_date.isoformat()}。每日开盘前发送上一交易日的组合表现、信号和持仓。</div>
+      <div style="font-size:14px;color:#d1d5db;">报告日期：{report_date.isoformat()}。当日回测完成后发送组合表现、信号和持仓。</div>
     </div>
 
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;border-collapse:separate;border-spacing:12px;">

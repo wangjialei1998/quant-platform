@@ -29,13 +29,8 @@ celery_app.conf.timezone = "Asia/Shanghai"
 celery_app.conf.beat_schedule = {
     "daily-monitor-after-market-close": {
         "task": "app.tasks.market_data_tasks.sync_running_portfolio_market_data",
-        "schedule": crontab(hour=18, minute=0),
+        "schedule": crontab(hour=15, minute=0),
         "kwargs": {"run_monitors": True},
         "options": {"queue": "market_data"},
-    },
-    "trading-day-morning-portfolio-reports": {
-        "task": "app.tasks.notification_tasks.send_previous_trading_day_reports",
-        "schedule": crontab(hour=8, minute=30),
-        "options": {"queue": "notification"},
     },
 }

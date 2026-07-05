@@ -282,7 +282,7 @@ class BacktestExecutionService:
         report_notification_id = PortfolioReportEmailService(self.db).create_report_notification(
             portfolio,
             run_id=run_id,
-            force=False,
+            force=True,
         )
         if report_notification_id:
             notification_ids.append(report_notification_id)
