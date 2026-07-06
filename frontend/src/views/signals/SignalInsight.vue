@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowLeft } from '@element-plus/icons-vue'
 import type { EChartsOption, SeriesOption } from 'echarts'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getSignalAnnualVolatility,
@@ -15,8 +15,11 @@ import {
 } from '@/api/signals'
 import BaseChart from '@/components/charts/BaseChart.vue'
 
-type PriceSeries = { name: string; data: [string, number][] }
-type SignalPoint = { date: string; symbol: string; side: 'buy' | 'sell'; price: number }
+type InstrumentOption = { symbol: string; name: string }
+type PriceSeries = InstrumentOption & { data: [string, number][] }
+type InstrumentSeries = InstrumentOption & { data: number[] }
+type SignalPoint = InstrumentOption & { date: string; side: 'buy' | 'sell'; price: number }
+type AnnualVolatilityRow = InstrumentOption & { annual_volatility: number }
 type Effectiveness = {
   buy?: { count?: number; day_5?: number; day_20?: number; avg_return?: number }
   sell?: { count?: number; day_5?: number; day_20?: number; avg_return?: number }
@@ -30,24 +33,40 @@ const effectiveness = ref<Effectiveness>({})
 const frequency = ref<Record<string, unknown>>({})
 const frequencyText = ref({ summary: '', buy: '', sell: '' })
 const risks = ref<Record<string, unknown>[]>([])
-const annualVolatility = ref<{ symbol: string; name: string; annual_volatility: number }[]>([])
+const annualVolatility = ref<AnnualVolatilityRow[]>([])
 const priceChart = ref<{ dates: string[]; series: PriceSeries[]; signals: SignalPoint[] }>({
   dates: [],
   series: [],
   signals: [],
 })
-const volatilityChart = ref<{ months: string[]; series: { name: string; data: number[] }[] }>({
+const volatilityChart = ref<{ months: string[]; series: InstrumentSeries[] }>({
   months: [],
   series: [],
 })
 const normalized = ref(true)
 const showSignals = ref(true)
+const selectedPriceSymbols = ref<string[]>([])
+const selectedVolatilitySymbols = ref<string[]>([])
+const selectedAnnualVolatilitySymbols = ref<string[]>([])
+
+const priceInstrumentOptions = computed(() => instrumentOptions(priceChart.value.series))
+const volatilityInstrumentOptions = computed(() => instrumentOptions(volatilityChart.value.series))
+const annualVolatilityInstrumentOptions = computed(() => instrumentOptions(annualVolatility.value))
+const filteredPriceSeries = computed(() =>
+  priceChart.value.series.filter((item) => selectedPriceSymbols.value.includes(item.symbol)),
+)
+const filteredVolatilitySeries = computed(() =>
+  volatilityChart.value.series.filter((item) => selectedVolatilitySymbols.value.includes(item.symbol)),
+)
+const filteredAnnualVolatility = computed(() =>
+  annualVolatility.value.filter((item) => selectedAnnualVolatilitySymbols.value.includes(item.symbol)),
+)
 
 const priceChartOption = computed<EChartsOption>(() => {
-  const series: SeriesOption[] = priceChart.value.series.map((item) => {
+  const series: SeriesOption[] = filteredPriceSeries.value.map((item) => {
     const data = chartSeriesData(item)
     const points = priceChart.value.signals
-      .filter((signal) => showSignals.value && signal.symbol === item.name)
+      .filter((signal) => showSignals.value && signal.symbol === item.symbol)
       .map((signal) => {
         const y = findSignalY(data, signal.date)
         if (y === null) return null
@@ -130,7 +149,7 @@ const volatilityOption = computed<EChartsOption>(() => ({
   grid: { top: 48, left: 48, right: 24, bottom: 48 },
   xAxis: { type: 'category', data: volatilityChart.value.months },
   yAxis: { type: 'value' },
-  series: volatilityChart.value.series.map((item) => ({
+  series: filteredVolatilitySeries.value.map((item) => ({
     name: item.name,
     type: 'bar',
     data: item.data,
@@ -140,13 +159,13 @@ const volatilityOption = computed<EChartsOption>(() => ({
 const annualVolatilityOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'axis', valueFormatter: (value) => `${Number(value).toFixed(2)}%` },
   grid: { top: 28, left: 56, right: 24, bottom: 42 },
-  xAxis: { type: 'category', data: annualVolatility.value.map((item) => item.symbol) },
+  xAxis: { type: 'category', data: filteredAnnualVolatility.value.map((item) => item.name) },
   yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
   series: [
     {
       name: '年化波动率',
       type: 'bar',
-      data: annualVolatility.value.map((item) => Number((item.annual_volatility * 100).toFixed(2))),
+      data: filteredAnnualVolatility.value.map((item) => Number((item.annual_volatility * 100).toFixed(2))),
       itemStyle: { color: '#7c3aed' },
     },
   ],
@@ -173,8 +192,11 @@ function formatReturn(value?: number) {
 
 async function load() {
   priceChart.value = await getSignalPriceChart(portfolioId)
+  syncSelectedSymbols(selectedPriceSymbols, priceChart.value.series)
   volatilityChart.value = await getSignalVolatility(portfolioId)
+  syncSelectedSymbols(selectedVolatilitySymbols, volatilityChart.value.series)
   annualVolatility.value = (await getSignalAnnualVolatility(portfolioId)).rows
+  syncSelectedSymbols(selectedAnnualVolatilitySymbols, annualVolatility.value)
   distribution.value = await getSignalDistribution(portfolioId)
   effectiveness.value = await getSignalEffectiveness(portfolioId)
   frequency.value = await getSignalFrequency(portfolioId)
@@ -183,6 +205,17 @@ async function load() {
 }
 
 onMounted(load)
+
+function instrumentOptions(items: InstrumentOption[]) {
+  return items.map((item) => ({ label: item.name || item.symbol, value: item.symbol }))
+}
+
+function syncSelectedSymbols(selection: Ref<string[]>, items: InstrumentOption[]) {
+  const symbols = items.map((item) => item.symbol)
+  const validSymbols = new Set(symbols)
+  const selected = selection.value.filter((symbol) => validSymbols.has(symbol))
+  selection.value = selected.length ? selected : symbols
+}
 </script>
 
 <template>
@@ -199,7 +232,20 @@ onMounted(load)
     </div>
 
     <el-card shadow="never" class="chart-panel">
-      <template #header>策略信号洞察图</template>
+      <template #header>
+        <div class="chart-header">
+          <span>策略信号洞察图</span>
+          <el-checkbox-group v-model="selectedPriceSymbols" class="instrument-filter">
+            <el-checkbox
+              v-for="item in priceInstrumentOptions"
+              :key="item.value"
+              :value="item.value"
+            >
+              {{ item.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+      </template>
       <BaseChart :option="priceChartOption" :height="400" />
     </el-card>
 
@@ -232,11 +278,37 @@ onMounted(load)
 
     <div class="insight-grid">
       <el-card shadow="never" class="chart-panel">
-        <template #header>月度波动率</template>
+        <template #header>
+          <div class="chart-header">
+            <span>月度波动率</span>
+            <el-checkbox-group v-model="selectedVolatilitySymbols" class="instrument-filter">
+              <el-checkbox
+                v-for="item in volatilityInstrumentOptions"
+                :key="item.value"
+                :value="item.value"
+              >
+                {{ item.label }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+        </template>
         <BaseChart :option="volatilityOption" :height="320" />
       </el-card>
       <el-card shadow="never" class="chart-panel">
-        <template #header>标的年化波动率</template>
+        <template #header>
+          <div class="chart-header">
+            <span>标的年化波动率</span>
+            <el-checkbox-group v-model="selectedAnnualVolatilitySymbols" class="instrument-filter">
+              <el-checkbox
+                v-for="item in annualVolatilityInstrumentOptions"
+                :key="item.value"
+                :value="item.value"
+              >
+                {{ item.label }}
+              </el-checkbox>
+            </el-checkbox-group>
+          </div>
+        </template>
         <BaseChart :option="annualVolatilityOption" :height="320" />
       </el-card>
     </div>
@@ -266,5 +338,20 @@ onMounted(load)
   gap: 8px;
   margin-top: 12px;
   line-height: 1.7;
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.instrument-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: 100%;
 }
 </style>

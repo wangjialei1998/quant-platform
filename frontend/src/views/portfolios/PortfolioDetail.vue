@@ -2,7 +2,7 @@
 import type { EChartsOption } from 'echarts'
 import { ArrowLeft, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   getCashFlows,
@@ -17,8 +17,11 @@ import {
   getTrades,
   runPortfolio,
   updatePortfolioEmail,
+  type InstrumentSeries,
   type Portfolio,
+  type PositionRow,
   type ReturnContributionPayload,
+  type TradeRow,
 } from '@/api/portfolios'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import TaskStatus from '@/components/common/TaskStatus.vue'
@@ -38,23 +41,25 @@ const portfolioId = Number(route.params.id)
 
 const portfolio = ref<Portfolio>()
 const summary = ref<Record<string, unknown>>()
-const trades = ref<Record<string, unknown>[]>([])
-const positions = ref<Record<string, unknown>[]>([])
+const trades = ref<TradeRow[]>([])
+const positions = ref<PositionRow[]>([])
 const cashFlows = ref<Record<string, unknown>[]>([])
 const performance = ref({
   monthly: [] as PerformanceItem[],
   yearly: [] as PerformanceItem[],
 })
-const positionValues = ref({ dates: [] as string[], series: [] as { name: string; data: number[] }[] })
+const positionValues = ref({ dates: [] as string[], series: [] as InstrumentSeries[] })
 const instrumentContribution = ref<ReturnContributionPayload>(emptyContribution('month'))
 const instrumentContributionPeriod = ref<Period>('month')
 const assetContributionPeriod = ref<Period>('month')
+const selectedContributionSymbols = ref<string[]>([])
+const selectedPositionValueSymbols = ref<string[]>([])
 const taskId = ref('')
 const equityCurve = ref({
   dates: [] as string[],
   portfolio: [] as number[],
   benchmark: [] as (number | null)[],
-  trades: [] as { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[],
+  trades: [] as { date: string; side: 'buy' | 'sell'; symbol: string; instrument_name: string; net_value: number | null }[],
 })
 const equityBenchmarks = [
   { name: '沪深300', symbol: '000300.SH', color: '#64748b' },
@@ -69,6 +74,15 @@ const periodOptions = [
   { label: '月度', value: 'month' },
   { label: '年度', value: 'year' },
 ]
+
+const contributionInstrumentOptions = computed(() => instrumentOptions(instrumentContribution.value.series))
+const positionValueInstrumentOptions = computed(() => instrumentOptions(positionValues.value.series))
+const filteredContributionSeries = computed(() =>
+  instrumentContribution.value.series.filter((item) => selectedContributionSymbols.value.includes(item.symbol)),
+)
+const filteredPositionValueSeries = computed(() =>
+  positionValues.value.series.filter((item) => selectedPositionValueSymbols.value.includes(item.symbol)),
+)
 
 const equityOption = computed<EChartsOption>(() => ({
   tooltip: { trigger: 'axis' },
@@ -120,8 +134,8 @@ const instrumentContributionOption = computed<EChartsOption>(() => ({
   dataZoom: [{ type: 'inside' }, { type: 'slider' }],
   xAxis: { type: 'category', data: instrumentContribution.value.periods },
   yAxis: { type: 'value', axisLabel: { formatter: (value: number) => percentFormatter(value) } },
-  series: instrumentContribution.value.series.map((item) => ({
-    name: item.symbol,
+  series: filteredContributionSeries.value.map((item) => ({
+    name: item.name,
     type: 'bar',
     data: item.data,
   })),
@@ -154,7 +168,7 @@ const positionValueOption = computed<EChartsOption>(() => ({
   xAxis: { type: 'category', data: positionValues.value.dates },
   yAxis: { type: 'value' },
   dataZoom: [{ type: 'inside' }, { type: 'slider' }],
-  series: positionValues.value.series.map((item) => ({
+  series: filteredPositionValueSeries.value.map((item) => ({
     name: item.name,
     type: 'line',
     areaStyle: {},
@@ -173,6 +187,7 @@ async function load() {
   cashFlows.value = await getCashFlows(portfolioId)
   performance.value = await getPortfolioPerformance(portfolioId)
   positionValues.value = await getPositionValues(portfolioId)
+  syncSelectedSymbols(selectedPositionValueSymbols, positionValues.value.series)
   await loadInstrumentContribution()
 }
 
@@ -191,6 +206,7 @@ async function loadEquityCurve() {
 
 async function loadInstrumentContribution() {
   instrumentContribution.value = await getReturnContribution(portfolioId, instrumentContributionPeriod.value)
+  syncSelectedSymbols(selectedContributionSymbols, instrumentContribution.value.series)
 }
 
 async function toggleEmail(value: boolean | string | number) {
@@ -213,11 +229,22 @@ function fixedBenchmarkCurve(annualReturn: number) {
 }
 
 function emptyContribution(period: Period): ReturnContributionPayload {
-  return { period, periods: [], symbols: [], series: [] }
+  return { period, periods: [], symbols: [], names: [], series: [] }
 }
 
 function percentFormatter(value: unknown) {
   return `${(Number(value || 0) * 100).toFixed(2)}%`
+}
+
+function instrumentOptions(series: InstrumentSeries[]) {
+  return series.map((item) => ({ label: item.name || item.symbol, value: item.symbol }))
+}
+
+function syncSelectedSymbols(selection: Ref<string[]>, series: InstrumentSeries[]) {
+  const symbols = series.map((item) => item.symbol)
+  const validSymbols = new Set(symbols)
+  const selected = selection.value.filter((symbol) => validSymbols.has(symbol))
+  selection.value = selected.length ? selected : symbols
 }
 </script>
 
@@ -251,8 +278,19 @@ function percentFormatter(value: unknown) {
       <el-card shadow="never" class="chart-panel">
         <template #header>
           <div class="chart-header">
-            <span>月度收益贡献表</span>
-            <el-segmented v-model="instrumentContributionPeriod" :options="periodOptions" />
+            <div class="chart-title-row">
+              <span>{{ instrumentContributionPeriod === 'month' ? '月度收益贡献表' : '年度收益贡献表' }}</span>
+              <el-segmented v-model="instrumentContributionPeriod" :options="periodOptions" />
+            </div>
+            <el-checkbox-group v-model="selectedContributionSymbols" class="instrument-filter">
+              <el-checkbox
+                v-for="item in contributionInstrumentOptions"
+                :key="item.value"
+                :value="item.value"
+              >
+                {{ item.label }}
+              </el-checkbox>
+            </el-checkbox-group>
           </div>
         </template>
         <BaseChart :option="instrumentContributionOption" />
@@ -270,7 +308,20 @@ function percentFormatter(value: unknown) {
     </div>
 
     <el-card shadow="never" class="chart-panel">
-      <template #header>历史持仓金额变化</template>
+      <template #header>
+        <div class="chart-header">
+          <span>历史持仓金额变化</span>
+          <el-checkbox-group v-model="selectedPositionValueSymbols" class="instrument-filter">
+            <el-checkbox
+              v-for="item in positionValueInstrumentOptions"
+              :key="item.value"
+              :value="item.value"
+            >
+              {{ item.label }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
+      </template>
       <BaseChart :option="positionValueOption" />
     </el-card>
 
@@ -298,7 +349,7 @@ function percentFormatter(value: unknown) {
       <el-tab-pane label="历史交易">
         <el-table :data="trades">
           <el-table-column prop="trade_date" label="日期" />
-          <el-table-column prop="symbol" label="标的" />
+          <el-table-column prop="instrument_name" label="标的" />
           <el-table-column prop="side" label="方向" />
           <el-table-column prop="quantity" label="数量" />
           <el-table-column prop="price" label="价格" />
@@ -308,7 +359,7 @@ function percentFormatter(value: unknown) {
       <el-tab-pane label="历史持仓">
         <el-table :data="positions">
           <el-table-column prop="date" label="日期" />
-          <el-table-column prop="symbol" label="标的" />
+          <el-table-column prop="instrument_name" label="标的" />
           <el-table-column prop="quantity" label="数量" />
           <el-table-column prop="market_value" label="市值" />
           <el-table-column prop="weight" label="权重" />
@@ -332,7 +383,21 @@ function percentFormatter(value: unknown) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.chart-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.instrument-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-width: 100%;
 }
 
 .detail-grid {

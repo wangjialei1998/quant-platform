@@ -1,5 +1,7 @@
 from collections import defaultdict
+from datetime import date, datetime
 from statistics import mean, pstdev
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -8,7 +10,7 @@ from app.core.database import get_db
 from app.engines.signal_insight_engine import SignalInsightEngine
 from app.models.instrument import Instrument
 from app.models.market_data import MarketDailyBar
-from app.models.portfolio import PortfolioInstrument, PortfolioPosition
+from app.models.portfolio import Portfolio, PortfolioInstrument, PortfolioPosition
 from app.models.signal import Signal
 
 router = APIRouter()
@@ -16,6 +18,10 @@ router = APIRouter()
 
 @router.get("/{portfolio_id}/signals/price-chart")
 def price_chart(portfolio_id: int, normalized: bool = True, db: Session = Depends(get_db)) -> dict:
+    portfolio = db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        return {"dates": [], "series": [], "signals": []}
+    end_date = _today()
     instrument_rows = (
         db.query(Instrument)
         .join(PortfolioInstrument, PortfolioInstrument.instrument_id == Instrument.id)
@@ -28,7 +34,11 @@ def price_chart(portfolio_id: int, normalized: bool = True, db: Session = Depend
     for instrument in instrument_rows:
         bars = (
             db.query(MarketDailyBar)
-            .filter(MarketDailyBar.instrument_id == instrument.id)
+            .filter(
+                MarketDailyBar.instrument_id == instrument.id,
+                MarketDailyBar.trade_date >= portfolio.start_date,
+                MarketDailyBar.trade_date <= end_date,
+            )
             .order_by(MarketDailyBar.trade_date)
             .all()
         )
@@ -39,12 +49,23 @@ def price_chart(portfolio_id: int, normalized: bool = True, db: Session = Depend
             values = [round((value - low) / (high - low) * 10, 4) if high != low else 5 for value in values]
         dates = [item.trade_date.isoformat() for item in bars]
         date_set.update(dates)
-        series.append({"name": instrument.symbol, "type": "line", "data": list(zip(dates, values))})
+        series.append(
+            {
+                "symbol": instrument.symbol,
+                "name": instrument.name,
+                "type": "line",
+                "data": list(zip(dates, values)),
+            }
+        )
 
     signals = (
         db.query(Signal, Instrument)
         .join(Instrument, Signal.instrument_id == Instrument.id)
-        .filter(Signal.portfolio_id == portfolio_id)
+        .filter(
+            Signal.portfolio_id == portfolio_id,
+            Signal.signal_date >= portfolio.start_date,
+            Signal.signal_date <= end_date,
+        )
         .order_by(Signal.signal_date)
         .all()
     )
@@ -55,6 +76,7 @@ def price_chart(portfolio_id: int, normalized: bool = True, db: Session = Depend
             {
                 "date": signal.signal_date.isoformat(),
                 "symbol": instrument.symbol,
+                "name": instrument.name,
                 "side": signal.side,
                 "price": float(signal.price),
             }
@@ -215,13 +237,13 @@ def risks(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
             }
         )
 
-    high_vol_symbols = _high_volatility_symbols(bars_by_instrument, instruments)
-    if high_vol_symbols:
+    high_volatility_names = _high_volatility_names(bars_by_instrument, instruments)
+    if high_volatility_names:
         risks_list.append(
             {
                 "type": "high_volatility",
                 "level": "warning",
-                "message": f"{'、'.join(high_vol_symbols)} 年化波动率超过45%，标的波动偏高。",
+                "message": f"{'、'.join(high_volatility_names)} 年化波动率超过45%，标的波动偏高。",
             }
         )
     return risks_list
@@ -229,6 +251,10 @@ def risks(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
 
 @router.get("/{portfolio_id}/signals/volatility")
 def volatility(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
+    portfolio = db.get(Portfolio, portfolio_id)
+    if not portfolio:
+        return {"months": [], "series": []}
+    end_date = _today()
     instruments = (
         db.query(Instrument)
         .join(PortfolioInstrument, PortfolioInstrument.instrument_id == Instrument.id)
@@ -236,11 +262,15 @@ def volatility(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
         .all()
     )
     months: set[str] = set()
-    grouped: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    grouped: dict[int, dict[str, object]] = {}
     for instrument in instruments:
         bars = (
             db.query(MarketDailyBar)
-            .filter(MarketDailyBar.instrument_id == instrument.id)
+            .filter(
+                MarketDailyBar.instrument_id == instrument.id,
+                MarketDailyBar.trade_date >= portfolio.start_date,
+                MarketDailyBar.trade_date <= end_date,
+            )
             .order_by(MarketDailyBar.trade_date)
             .all()
         )
@@ -250,20 +280,29 @@ def volatility(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
             months.add(month)
             close = float(bar.close)
             if previous:
-                grouped[instrument.symbol][month].append(close / previous - 1)
+                item = grouped.setdefault(
+                    instrument.id,
+                    {"symbol": instrument.symbol, "name": instrument.name, "returns": defaultdict(list)},
+                )
+                returns = item["returns"]
+                if isinstance(returns, defaultdict):
+                    returns[month].append(close / previous - 1)
             previous = close
     ordered_months = sorted(months)
     return {
         "months": ordered_months,
         "series": [
             {
-                "name": symbol,
+                "symbol": item["symbol"],
+                "name": item["name"],
                 "data": [
-                    round(pstdev(grouped[symbol][month]), 6) if len(grouped[symbol][month]) > 1 else 0
+                    round(pstdev(returns[month]), 6) if len(returns[month]) > 1 else 0
                     for month in ordered_months
                 ],
             }
-            for symbol in grouped
+            for item in sorted(grouped.values(), key=lambda value: str(value["symbol"]))
+            for returns in [item["returns"]]
+            if isinstance(returns, defaultdict)
         ],
     }
 
@@ -313,6 +352,10 @@ def _bars_by_instrument(db: Session, instrument_ids: list[int]) -> dict[int, lis
     for row in rows:
         grouped[row.instrument_id].append(row)
     return grouped
+
+
+def _today() -> date:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date()
 
 
 def _effectiveness_for_side(signals: list[Signal], bars_by_instrument: dict[int, list[MarketDailyBar]], side: str) -> dict:
@@ -406,8 +449,8 @@ def _max_empty_position_days(db: Session, portfolio_id: int) -> int:
     return max_empty
 
 
-def _high_volatility_symbols(bars_by_instrument: dict[int, list[MarketDailyBar]], instruments: dict[int, Instrument]) -> list[str]:
-    symbols = []
+def _high_volatility_names(bars_by_instrument: dict[int, list[MarketDailyBar]], instruments: dict[int, Instrument]) -> list[str]:
+    names = []
     for bars in bars_by_instrument.values():
         returns = []
         previous = None
@@ -418,5 +461,5 @@ def _high_volatility_symbols(bars_by_instrument: dict[int, list[MarketDailyBar]]
             previous = close
         if len(returns) > 1 and pstdev(returns) * (252**0.5) > 0.45:
             instrument = instruments.get(bars[0].instrument_id)
-            symbols.append(instrument.symbol if instrument else str(bars[0].instrument_id))
-    return symbols
+            names.append(instrument.name if instrument else str(bars[0].instrument_id))
+    return names

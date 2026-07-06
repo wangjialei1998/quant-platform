@@ -4,8 +4,8 @@ export function getSignalPriceChart(portfolioId: number) {
   return unwrap(
     http.get<{
       dates: string[]
-      series: { name: string; data: [string, number][] }[]
-      signals: { date: string; symbol: string; side: 'buy' | 'sell'; price: number }[]
+      series: { symbol: string; name: string; data: [string, number][] }[]
+      signals: { date: string; symbol: string; name: string; side: 'buy' | 'sell'; price: number }[]
     }>(
       `/portfolios/${portfolioId}/signals/price-chart`,
     ),
@@ -33,7 +33,7 @@ export function getSignalRisks(portfolioId: number) {
 }
 
 export function getSignalVolatility(portfolioId: number) {
-  return unwrap(http.get<{ months: string[]; series: { name: string; data: number[] }[] }>(`/portfolios/${portfolioId}/signals/volatility`))
+  return unwrap(http.get<{ months: string[]; series: { symbol: string; name: string; data: number[] }[] }>(`/portfolios/${portfolioId}/signals/volatility`))
 }
 
 export function getSignalAnnualVolatility(portfolioId: number) {

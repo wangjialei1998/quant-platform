@@ -46,9 +46,15 @@ class ChartService:
             .all()
         )
         position_dates = sorted({position.trade_date.isoformat() for position, _ in positions})
-        position_values: dict[str, dict[str, float]] = {}
+        position_values: dict[int, dict[str, object]] = {}
         for position, instrument in positions:
-            position_values.setdefault(instrument.symbol, {})[position.trade_date.isoformat()] = float(position.market_value)
+            item = position_values.setdefault(
+                instrument.id,
+                {"symbol": instrument.symbol, "name": instrument.name, "values": {}},
+            )
+            values = item["values"]
+            if isinstance(values, dict):
+                values[position.trade_date.isoformat()] = float(position.market_value)
 
         payloads = {
             "equity_curve": {
@@ -59,6 +65,7 @@ class ChartService:
                         "date": trade.trade_date.isoformat(),
                         "side": trade.side,
                         "symbol": instrument.symbol,
+                        "instrument_name": instrument.name,
                         "net_value": _metric_value_on(metrics, trade.trade_date),
                     }
                     for trade, instrument in trades
@@ -74,6 +81,7 @@ class ChartService:
                         "date": signal.signal_date.isoformat(),
                         "side": signal.side,
                         "symbol": instrument.symbol,
+                        "name": instrument.name,
                         "price": float(signal.price),
                     }
                     for signal, instrument in signals
@@ -83,10 +91,13 @@ class ChartService:
                 "dates": position_dates,
                 "series": [
                     {
-                        "name": symbol,
+                        "symbol": item["symbol"],
+                        "name": item["name"],
                         "data": [round(values.get(day, 0), 2) for day in position_dates],
                     }
-                    for symbol, values in sorted(position_values.items())
+                    for item in sorted(position_values.values(), key=lambda value: str(value["symbol"]))
+                    for values in [item["values"]]
+                    if isinstance(values, dict)
                 ],
             },
             "performance": {

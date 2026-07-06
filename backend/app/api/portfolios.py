@@ -244,6 +244,7 @@ def get_equity_curve(portfolio_id: int, benchmark_symbol: str | None = None, db:
                 "date": trade.trade_date.isoformat(),
                 "side": trade.side,
                 "symbol": instrument.symbol,
+                "instrument_name": instrument.name,
                 "net_value": _metric_value_on(rows, trade.trade_date),
             }
             for trade, instrument in trades
@@ -279,6 +280,7 @@ def get_positions(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict
             "date": item.trade_date,
             "instrument_id": item.instrument_id,
             "symbol": instruments[item.instrument_id].symbol if item.instrument_id in instruments else item.instrument_id,
+            "instrument_name": instruments[item.instrument_id].name if item.instrument_id in instruments else str(item.instrument_id),
             "quantity": item.quantity,
             "market_value": item.market_value,
             "weight": item.weight,
@@ -301,6 +303,7 @@ def get_trades(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
             "trade_date": item.trade_date,
             "instrument_id": item.instrument_id,
             "symbol": instruments[item.instrument_id].symbol if item.instrument_id in instruments else item.instrument_id,
+            "instrument_name": instruments[item.instrument_id].name if item.instrument_id in instruments else str(item.instrument_id),
             "side": item.side,
             "quantity": item.quantity,
             "price": item.price,
@@ -357,17 +360,26 @@ def get_position_values(portfolio_id: int, db: Session = Depends(get_db)) -> dic
         .all()
     )
     dates = sorted({position.trade_date.isoformat() for position, _ in rows})
-    grouped: dict[str, dict[str, float]] = {}
+    grouped: dict[int, dict[str, object]] = {}
     for position, instrument in rows:
-        grouped.setdefault(instrument.symbol, {})[position.trade_date.isoformat()] = float(position.market_value)
+        item = grouped.setdefault(
+            instrument.id,
+            {"symbol": instrument.symbol, "name": instrument.name, "values": {}},
+        )
+        values = item["values"]
+        if isinstance(values, dict):
+            values[position.trade_date.isoformat()] = float(position.market_value)
     return {
         "dates": dates,
         "series": [
             {
-                "name": symbol,
+                "symbol": item["symbol"],
+                "name": item["name"],
                 "data": [round(values.get(day, 0), 2) for day in dates],
             }
-            for symbol, values in sorted(grouped.items())
+            for item in sorted(grouped.values(), key=lambda value: str(value["symbol"]))
+            for values in [item["values"]]
+            if isinstance(values, dict)
         ],
     }
 
@@ -431,7 +443,7 @@ def get_return_contribution(portfolio_id: int, period: str = "month", db: Sessio
             amounts["sell"] += trade.net_amount
 
     periods = sorted(metric_groups)
-    series = [{"symbol": instrument.symbol, "data": []} for instrument in instruments]
+    series = [{"symbol": instrument.symbol, "name": instrument.name, "data": []} for instrument in instruments]
     previous_metric: PortfolioMetric | None = None
 
     for period_key in periods:
@@ -461,6 +473,7 @@ def get_return_contribution(portfolio_id: int, period: str = "month", db: Sessio
         "period": period,
         "periods": periods,
         "symbols": [instrument.symbol for instrument in instruments],
+        "names": [instrument.name for instrument in instruments],
         "series": series,
     }
 

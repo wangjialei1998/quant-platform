@@ -95,7 +95,7 @@ export interface EquityCurvePayload {
   dates: string[]
   portfolio: number[]
   benchmark: (number | null)[]
-  trades: { date: string; side: 'buy' | 'sell'; symbol: string; net_value: number | null }[]
+  trades: { date: string; side: 'buy' | 'sell'; symbol: string; instrument_name: string; net_value: number | null }[]
 }
 
 export interface DrawdownPayload {
@@ -115,12 +115,34 @@ export function getDrawdown(id: number) {
   return unwrap(http.get<DrawdownPayload>(`/portfolios/${id}/drawdown`))
 }
 
+export interface TradeRow {
+  trade_date: string
+  instrument_id: number
+  symbol: string
+  instrument_name: string
+  side: string
+  quantity: string
+  price: string
+  net_amount: string
+  status: string
+}
+
+export interface PositionRow {
+  date: string
+  instrument_id: number
+  symbol: string
+  instrument_name: string
+  quantity: string
+  market_value: string
+  weight: number
+}
+
 export function getTrades(id: number) {
-  return unwrap(http.get<[]>(`/portfolios/${id}/trades`))
+  return unwrap(http.get<TradeRow[]>(`/portfolios/${id}/trades`))
 }
 
 export function getPositions(id: number) {
-  return unwrap(http.get<[]>(`/portfolios/${id}/positions`))
+  return unwrap(http.get<PositionRow[]>(`/portfolios/${id}/positions`))
 }
 
 export function getCashFlows(id: number) {
@@ -136,15 +158,22 @@ export function getPortfolioPerformance(id: number) {
   )
 }
 
+export interface InstrumentSeries {
+  symbol: string
+  name: string
+  data: number[]
+}
+
 export function getPositionValues(id: number) {
-  return unwrap(http.get<{ dates: string[]; series: { name: string; data: number[] }[] }>(`/portfolios/${id}/position-values`))
+  return unwrap(http.get<{ dates: string[]; series: InstrumentSeries[] }>(`/portfolios/${id}/position-values`))
 }
 
 export interface ReturnContributionPayload {
   period: 'month' | 'year'
   periods: string[]
   symbols: string[]
-  series: { symbol: string; data: number[] }[]
+  names?: string[]
+  series: InstrumentSeries[]
 }
 
 export function getReturnContribution(id: number, period: 'month' | 'year') {
