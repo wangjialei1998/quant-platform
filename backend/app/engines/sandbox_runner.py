@@ -174,6 +174,7 @@ def run(payload, strategy_path):
     cerebro.broker.setcash(float(portfolio["initial_cash"]))
     cerebro.broker.setcommission(commission=float(portfolio["commission_rate"]))
     cerebro.broker.set_slippage_perc(float(portfolio["slippage_rate"]))
+    cerebro.broker.set_coc(True)
     cerebro.addsizer(bt.sizers.FixedSize, stake=100)
 
     for instrument in payload["instruments"]:
@@ -206,6 +207,7 @@ def run(payload, strategy_path):
     strategies = cerebro.run(runonce=False)
     strategy = strategies[0]
     return {
+        "signals": strategy._audit_signals,
         "trades": strategy._audit_trades,
         "positions": strategy._audit_positions,
         "equity_curve": strategy._audit_equity,
@@ -230,6 +232,7 @@ def instrument_strategy(strategy_cls, portfolio):
     class InstrumentedStrategy(strategy_cls):
         def __init__(self):
             super().__init__()
+            self._audit_signals = []
             self._audit_trades = []
             self._audit_positions = []
             self._audit_equity = []
@@ -284,6 +287,13 @@ def instrument_strategy(strategy_cls, portfolio):
                     "reject_reason": None,
                 }
             )
+            self._record_snapshot(force=True)
+
+        def stop(self):
+            super_stop = getattr(super(), "stop", None)
+            if callable(super_stop):
+                super_stop()
+            self._record_pending_signals()
 
         def buy(self, *args, **kwargs):
             order = super().buy(*args, **kwargs)
@@ -303,6 +313,28 @@ def instrument_strategy(strategy_cls, portfolio):
         def _remember_signal_date(self, order):
             if order is not None and order.ref not in self._order_signal_dates:
                 self._order_signal_dates[order.ref] = data_date(order.data)
+
+        def _record_pending_signals(self):
+            seen = set()
+            for order in list(getattr(self, "_orderspending", [])):
+                if order.status not in (order.Created, order.Submitted, order.Accepted):
+                    continue
+                signal_date = self._order_signal_dates.get(order.ref) or data_date(order.data)
+                symbol = str(order.data._name)
+                side = "buy" if order.isbuy() else "sell"
+                key = (symbol, side, signal_date)
+                if key in seen:
+                    continue
+                seen.add(key)
+                price = decimal(order.created.price or order.data.close[0], "0.0001")
+                self._audit_signals.append(
+                    {
+                        "symbol": symbol,
+                        "signal_date": signal_date.isoformat(),
+                        "side": side,
+                        "price": str(price),
+                    }
+                )
 
         def next(self):
             user_next = getattr(super(), "next", None)
@@ -364,12 +396,20 @@ def instrument_strategy(strategy_cls, portfolio):
                 }
             )
 
-        def _record_snapshot(self):
+        def _record_snapshot(self, force=False):
             if not self.datas:
                 return
             current_date = strategy_date(self)
-            if self._last_snapshot_date == current_date:
+            if self._last_snapshot_date == current_date and not force:
                 return
+            if force:
+                current_key = current_date.isoformat()
+                self._audit_equity = [
+                    item for item in self._audit_equity if item["trade_date"] != current_key
+                ]
+                self._audit_positions = [
+                    item for item in self._audit_positions if item["trade_date"] != current_key
+                ]
             self._last_snapshot_date = current_date
             cash = decimal(self.broker.getcash(), "0.01")
             total_asset = decimal(self.broker.getvalue(), "0.01")

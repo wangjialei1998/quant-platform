@@ -43,6 +43,14 @@ class SandboxTrade:
 
 
 @dataclass(frozen=True)
+class SandboxSignal:
+    symbol: str
+    signal_date: date
+    side: str
+    price: Decimal
+
+
+@dataclass(frozen=True)
 class SandboxPosition:
     symbol: str
     trade_date: date
@@ -108,10 +116,18 @@ class BacktestExecutionService:
 
             payload = self._sandbox_payload(portfolio, instruments, bars_by_instrument)
             sandbox_result = BacktraderEngine().run_daily_backtest(portfolio.strategy.code_path, payload)
-            trades, positions, equity_curve = self._parse_sandbox_result(sandbox_result)
+            trades, positions, equity_curve, pending_signals = self._parse_sandbox_result(sandbox_result)
 
             self._clear_portfolio_outputs(portfolio.id)
-            notification_ids = self._persist_result(portfolio, instruments, trades, positions, equity_curve, run.id)
+            notification_ids = self._persist_result(
+                portfolio,
+                instruments,
+                trades,
+                positions,
+                equity_curve,
+                pending_signals,
+                run.id,
+            )
 
             run.status = "success"
             if equity_curve:
@@ -212,7 +228,7 @@ class BacktestExecutionService:
     def _parse_sandbox_result(
         self,
         result: dict,
-    ) -> tuple[list[SandboxTrade], list[SandboxPosition], list[SandboxEquity]]:
+    ) -> tuple[list[SandboxTrade], list[SandboxPosition], list[SandboxEquity], list[SandboxSignal]]:
         trades = [
             SandboxTrade(
                 symbol=item["symbol"],
@@ -233,6 +249,15 @@ class BacktestExecutionService:
                 reject_reason=item.get("reject_reason"),
             )
             for item in result.get("trades", [])
+        ]
+        pending_signals = [
+            SandboxSignal(
+                symbol=item["symbol"],
+                signal_date=date.fromisoformat(item["signal_date"]),
+                side=item["side"],
+                price=Decimal(item["price"]),
+            )
+            for item in result.get("signals", [])
         ]
         positions = [
             SandboxPosition(
@@ -255,7 +280,7 @@ class BacktestExecutionService:
             )
             for item in result.get("equity_curve", [])
         ]
-        return trades, positions, equity_curve
+        return trades, positions, equity_curve, pending_signals
 
     def _clear_portfolio_outputs(self, portfolio_id: int) -> None:
         from app.models.notification import Notification
@@ -272,10 +297,12 @@ class BacktestExecutionService:
         trades: list[SandboxTrade],
         positions: list[SandboxPosition],
         equity_curve: list[SandboxEquity],
+        pending_signals: list[SandboxSignal],
         run_id: int,
     ) -> list[int]:
         instrument_by_symbol = {item.symbol: item for item in instruments}
         notification_ids = self._persist_trades_and_signals(portfolio, instrument_by_symbol, trades, run_id)
+        self._persist_pending_signals(portfolio, instrument_by_symbol, pending_signals, trades, run_id)
         self._persist_positions(portfolio, instrument_by_symbol, positions)
         self._persist_metrics(portfolio, equity_curve, [trade for trade in trades if trade.status == "filled"])
         self.db.flush()
@@ -287,6 +314,41 @@ class BacktestExecutionService:
         if report_notification_id:
             notification_ids.append(report_notification_id)
         return notification_ids
+
+    def _persist_pending_signals(
+        self,
+        portfolio: Portfolio,
+        instrument_by_symbol: dict[str, Instrument],
+        pending_signals: list[SandboxSignal],
+        trades: list[SandboxTrade],
+        run_id: int,
+    ) -> None:
+        existing = {
+            (trade.symbol, trade.side, trade.signal_date or trade.trade_date)
+            for trade in trades
+        }
+        seen: set[tuple[str, str, date]] = set()
+        for item in pending_signals:
+            key = (item.symbol, item.side, item.signal_date)
+            if key in existing or key in seen:
+                continue
+            seen.add(key)
+            instrument = instrument_by_symbol.get(item.symbol)
+            if not instrument:
+                continue
+            self.db.add(
+                Signal(
+                    portfolio_id=portfolio.id,
+                    instrument_id=instrument.id,
+                    run_id=run_id,
+                    signal_date=item.signal_date,
+                    side=item.side,
+                    price=item.price,
+                    status="pending_trade",
+                    email_status="pending" if portfolio.email_enabled else "disabled",
+                    created_at=utc_now(),
+                )
+            )
 
     def _persist_trades_and_signals(
         self,

@@ -9,7 +9,7 @@ from app.services.notification_service import NotificationService
 from app.services.portfolio_report_email_service import PortfolioReportEmailService
 from app.tasks.celery_app import celery_app
 from app.utils.time import utc_now
-from app.utils.trading_calendar import is_trading_day, previous_trading_day
+from app.utils.trading_calendar import is_trading_day
 
 
 @celery_app.task(name="app.tasks.notification_tasks.send_notification", bind=True, max_retries=2, default_retry_delay=30)
@@ -54,13 +54,13 @@ def send_notification(self, notification_id: int) -> dict:
             db.close()
 
 
-@celery_app.task(name="app.tasks.notification_tasks.send_previous_trading_day_reports")
-def send_previous_trading_day_reports() -> dict:
+@celery_app.task(name="app.tasks.notification_tasks.send_today_trading_day_reports")
+def send_today_trading_day_reports() -> dict:
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     if not is_trading_day(today):
         return {"status": "skipped", "message": "today is not a trading day", "date": today.isoformat()}
 
-    report_date = previous_trading_day(today)
+    report_date = today
     db = SessionLocal()
     try:
         portfolios = (

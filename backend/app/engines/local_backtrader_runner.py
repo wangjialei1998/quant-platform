@@ -91,6 +91,7 @@ class LocalBacktraderRunner:
         cerebro.broker.setcash(float(portfolio.initial_cash))
         cerebro.broker.setcommission(commission=float(portfolio.commission_rate))
         cerebro.broker.set_slippage_perc(float(portfolio.slippage_rate))
+        cerebro.broker.set_coc(True)
         cerebro.addsizer(bt.sizers.FixedSize, stake=100)
 
         start_date: date | None = None
@@ -224,6 +225,7 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
                     total_asset=total_asset,
                 )
             )
+            self._record_daily_snapshot(force=True)
 
         def buy(self, *args, **kwargs):
             order = super().buy(*args, **kwargs)
@@ -303,12 +305,19 @@ def _instrument_strategy(strategy_cls: type[bt.Strategy], portfolio: Portfolio) 
                 )
             )
 
-        def _record_daily_snapshot(self):
+        def _record_daily_snapshot(self, force: bool = False):
             if not self.datas:
                 return
             current_date = _strategy_date(self)
-            if self._last_snapshot_date == current_date:
+            if self._last_snapshot_date == current_date and not force:
                 return
+            if force:
+                self._audit_equity = [
+                    item for item in self._audit_equity if item.trade_date != current_date
+                ]
+                self._audit_positions = [
+                    item for item in self._audit_positions if item.trade_date != current_date
+                ]
             self._last_snapshot_date = current_date
             cash = Decimal(str(self.broker.getcash())).quantize(Decimal("0.01"))
             total_asset = Decimal(str(self.broker.getvalue())).quantize(Decimal("0.01"))

@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from html import escape
 
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.integrations.smtp_client import SMTPClient
@@ -206,7 +206,7 @@ class PortfolioReportEmailService:
             .filter(
                 Trade.portfolio_id == portfolio_id,
                 Trade.status == "filled",
-                or_(Trade.trade_date == report_date, Trade.signal_date == report_date),
+                Trade.signal_date == report_date,
             )
         )
         if run_id is not None:
@@ -381,7 +381,7 @@ class PortfolioReportEmailService:
     {_section('组合内未持仓标的', watch_rows_html, '#f97316')}
 
     <div style="font-size:12px;color:#6b7280;margin-top:18px;line-height:1.7;">
-      说明：正式任务会在每个交易日开盘前发送上一交易日报。价格使用未复权日线 close；策略信号按收盘后生成，模拟成交按下一交易日开盘价执行。
+      说明：正式任务会在每个交易日回测完成后发送当日报告。价格使用未复权日线 close；策略信号按当前日线生成，模拟成交按当日 close 执行。
     </div>
   </div>
 </body>
@@ -567,7 +567,7 @@ def _side_color(side: str) -> str:
 
 
 def _signal_status_label(status: str) -> str:
-    return {"traded": "已成交", "pending_trade": "待次日成交", "rejected": "已拒绝"}.get(status, status)
+    return {"traded": "已成交", "pending_trade": "待成交", "rejected": "已拒绝"}.get(status, status)
 
 
 def _tone(value: float | Decimal | None) -> str:
