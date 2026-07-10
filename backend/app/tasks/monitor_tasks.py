@@ -4,6 +4,8 @@ from app.core.database import SessionLocal
 from app.models.portfolio import Portfolio
 from app.services.backtest_execution_service import BacktestExecutionService
 from app.services.market_data_sync_service import MarketDataSyncService
+from app.services.notification_service import NotificationService
+from app.services.portfolio_report_email_service import PortfolioReportEmailService
 from app.tasks.chart_tasks import build_chart_snapshots
 from app.tasks.celery_app import celery_app
 from app.utils.trading_calendar import previous_or_same_trading_day
@@ -14,11 +16,32 @@ def monitor_all_portfolios(sync_market_data: bool = True) -> dict:
     db = SessionLocal()
     try:
         portfolios = db.query(Portfolio).filter(Portfolio.status == "running").all()
-        task_ids = [
-            monitor_portfolio.delay(item.id, "scheduled_monitor", sync_market_data).id
-            for item in portfolios
-        ]
-        return {"status": "submitted", "task_ids": task_ids}
+        results = []
+        report_runs: list[tuple[Portfolio, int | None]] = []
+        service = BacktestExecutionService(db)
+        for portfolio in portfolios:
+            result = service.initialize_portfolio(
+                portfolio.id,
+                "scheduled_monitor",
+                sync_market_data=sync_market_data,
+                send_report_email=False,
+            )
+            results.append(result)
+            if result.get("status") == "success":
+                build_chart_snapshots.delay(portfolio.id)
+                if portfolio.email_enabled:
+                    report_runs.append((portfolio, result.get("run_id")))
+
+        notification_id = PortfolioReportEmailService(db).create_combined_report_notification(report_runs)
+        if notification_id:
+            db.commit()
+            NotificationService.enqueue([notification_id])
+        return {
+            "status": "success",
+            "portfolio_count": len(portfolios),
+            "results": results,
+            "notification_id": notification_id,
+        }
     finally:
         db.close()
 
@@ -35,6 +58,7 @@ def monitor_portfolio(
             portfolio_id,
             run_type,
             sync_market_data=sync_market_data,
+            send_report_email=True,
         )
         result["run_type"] = run_type
         if result.get("status") == "success":
@@ -62,6 +86,7 @@ def sync_and_monitor_portfolio(portfolio_id: int, run_type: str = "manual_monito
             portfolio_id,
             run_type,
             sync_market_data=False,
+            send_report_email=True,
         )
         result["run_type"] = run_type
         result["market_data_sync"] = sync_result

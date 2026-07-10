@@ -54,6 +54,56 @@ class PortfolioReportEmailService:
         )
         return notification.id
 
+    def create_combined_report_notification(self, portfolio_runs: list[tuple[Portfolio, int | None]]) -> int | None:
+        reports: list[tuple[Portfolio, PortfolioEmailReport]] = []
+        for portfolio, run_id in portfolio_runs:
+            if not portfolio.email_enabled:
+                continue
+            report = self.build_report(portfolio.id, run_id=run_id, force=True)
+            if report.should_send:
+                reports.append((portfolio, report))
+        if not reports:
+            return None
+
+        report_dates = [_report_date_from_subject(report.subject) for _, report in reports]
+        report_date = next((item for item in report_dates if item), date.today().isoformat())
+        subject = f"组合每日量化监控报告 {report_date}"
+        plain_text = "\n\n".join(report.plain_text for _, report in reports)
+        sections = "\n".join(
+            f"""
+    <div style="background:#fff;border-radius:14px;margin-top:18px;padding:20px 22px;box-shadow:0 8px 20px rgba(15,23,42,.06);">
+      <h2 style="margin:0 0 14px;font-size:20px;line-height:1.3;color:#111827;">{escape(portfolio.name)}</h2>
+      {_html_body(report.html)}
+    </div>
+            """
+            for portfolio, report in reports
+        )
+        html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{escape(subject)}</title>
+</head>
+<body style="margin:0;background:#eef2f7;font-family:Arial,'Microsoft YaHei',sans-serif;color:#172033;">
+  <div style="max-width:980px;margin:0 auto;padding:28px 18px;">
+    <div style="background:#111827;border-radius:14px;padding:26px 28px;color:#fff;">
+      <div style="font-size:13px;letter-spacing:0;color:#93c5fd;">交易日回测合并日报</div>
+      <h1 style="margin:8px 0 10px;font-size:26px;line-height:1.3;">组合每日量化监控报告</h1>
+      <div style="font-size:14px;color:#d1d5db;">本邮件包含 {len(reports)} 个已开启邮件提醒的组合。</div>
+    </div>
+    {sections}
+  </div>
+</body>
+</html>"""
+        notification = NotificationService(self.db).create_event(
+            None,
+            "daily_report",
+            subject,
+            html,
+            should_send=True,
+        )
+        return notification.id
+
     def send_report_now(
         self,
         portfolio_id: int,
@@ -547,6 +597,22 @@ def _table(headers: list[str], rows: str) -> str:
         f"<tbody>{rows}</tbody>"
         "</table>"
     )
+
+
+def _html_body(value: str) -> str:
+    lower = value.lower()
+    start = lower.find("<body")
+    if start >= 0:
+        start = lower.find(">", start)
+        if start >= 0:
+            end = lower.rfind("</body>")
+            return value[start + 1 : end if end >= 0 else len(value)]
+    return value
+
+
+def _report_date_from_subject(subject: str) -> str | None:
+    parts = subject.rsplit(" ", 1)
+    return parts[-1] if parts and len(parts[-1]) == 10 else None
 
 
 def _th() -> str:

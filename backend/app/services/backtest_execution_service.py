@@ -78,6 +78,7 @@ class BacktestExecutionService:
         portfolio_id: int,
         run_type: str = "initial_backtest",
         sync_market_data: bool = True,
+        send_report_email: bool = True,
     ) -> dict:
         portfolio = self.db.get(Portfolio, portfolio_id)
         if not portfolio:
@@ -127,6 +128,7 @@ class BacktestExecutionService:
                 equity_curve,
                 pending_signals,
                 run.id,
+                send_report_email,
             )
 
             run.status = "success"
@@ -299,6 +301,7 @@ class BacktestExecutionService:
         equity_curve: list[SandboxEquity],
         pending_signals: list[SandboxSignal],
         run_id: int,
+        send_report_email: bool,
     ) -> list[int]:
         instrument_by_symbol = {item.symbol: item for item in instruments}
         notification_ids = self._persist_trades_and_signals(portfolio, instrument_by_symbol, trades, run_id)
@@ -306,6 +309,8 @@ class BacktestExecutionService:
         self._persist_positions(portfolio, instrument_by_symbol, positions)
         self._persist_metrics(portfolio, equity_curve, [trade for trade in trades if trade.status == "filled"])
         self.db.flush()
+        if not send_report_email:
+            return notification_ids
         report_notification_id = PortfolioReportEmailService(self.db).create_report_notification(
             portfolio,
             run_id=run_id,
