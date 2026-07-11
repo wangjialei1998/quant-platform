@@ -268,7 +268,12 @@ def get_drawdown(portfolio_id: int, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/{portfolio_id}/positions")
 def get_positions(portfolio_id: int, db: Session = Depends(get_db)) -> list[dict]:
-    rows = db.query(PortfolioPosition).filter(PortfolioPosition.portfolio_id == portfolio_id).limit(500).all()
+    rows = (
+        db.query(PortfolioPosition)
+        .filter(PortfolioPosition.portfolio_id == portfolio_id, PortfolioPosition.quantity > 0)
+        .limit(500)
+        .all()
+    )
     instruments = {
         item.id: item
         for item in db.query(Instrument)
