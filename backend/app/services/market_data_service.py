@@ -1,7 +1,7 @@
 import logging
 import random
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -97,7 +97,7 @@ class MarketDataService:
             if existing_dates:
                 cached_start = min(existing_dates)
                 cached_end = max(existing_dates)
-                if cached_start <= sync_start_date and cached_end >= sync_end_date:
+                if cached_start <= sync_start_date + timedelta(days=7) and cached_end >= sync_end_date:
                     synced.append(
                         {
                             "instrument_id": instrument.id,
