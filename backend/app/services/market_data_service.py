@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.integrations.tickflow_client import TickFlowClient
 from app.models.instrument import Instrument
 from app.models.market_data import MarketDailyBar
-from app.utils.trading_calendar import next_or_same_trading_day, previous_or_same_trading_day, trading_day_count
+from app.utils.trading_calendar import next_or_same_trading_day, previous_or_same_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -95,16 +95,9 @@ class MarketDataService:
 
             existing_dates = self._existing_dates(instrument.id, sync_start_date, sync_end_date, adjustment_type)
             if existing_dates:
-                missing_start = sync_start_date if min(existing_dates) > sync_start_date else None
-                missing_end = sync_end_date if max(existing_dates) < sync_end_date else None
                 cached_start = min(existing_dates)
                 cached_end = max(existing_dates)
-                full_span_cached = (
-                    cached_start <= sync_start_date
-                    and cached_end >= sync_end_date
-                    and len(existing_dates) >= trading_day_count(sync_start_date, sync_end_date) * 0.6
-                )
-                if missing_start is None and missing_end is None and full_span_cached:
+                if cached_start <= sync_start_date and cached_end >= sync_end_date:
                     synced.append(
                         {
                             "instrument_id": instrument.id,
