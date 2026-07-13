@@ -143,7 +143,7 @@ import importlib.util
 import inspect
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import backtrader as bt
@@ -168,7 +168,14 @@ def main():
 
 def run(payload, strategy_path):
     strategy_cls = load_strategy(strategy_path)
-    audit_cls = instrument_strategy(strategy_cls, payload["portfolio"])
+    bar_dates = [
+        date.fromisoformat(row["trade_date"])
+        for rows in payload["bars"].values()
+        for row in rows
+    ]
+    report_date = max(bar_dates) if bar_dates else None
+    flush_date = report_date + timedelta(days=1) if report_date else None
+    audit_cls = instrument_strategy(strategy_cls, payload["portfolio"], report_date)
     cerebro = bt.Cerebro(stdstats=False)
     portfolio = payload["portfolio"]
     cerebro.broker.setcash(float(portfolio["initial_cash"]))
@@ -199,6 +206,8 @@ def run(payload, strategy_path):
                 for row in rows
             ]
         )
+        if flush_date:
+            frame.loc[len(frame)] = {**frame.iloc[-1].to_dict(), "datetime": flush_date.isoformat()}
         frame["datetime"] = pd.to_datetime(frame["datetime"])
         frame = frame.set_index("datetime")
         cerebro.adddata(AmountPandasData(dataname=frame), name=instrument["symbol"])
@@ -228,7 +237,7 @@ def load_strategy(strategy_path):
     return candidates[0]
 
 
-def instrument_strategy(strategy_cls, portfolio):
+def instrument_strategy(strategy_cls, portfolio, report_date):
     class InstrumentedStrategy(strategy_cls):
         def __init__(self):
             super().__init__()
@@ -248,8 +257,8 @@ def instrument_strategy(strategy_cls, portfolio):
             if order.status != order.Completed:
                 return
 
-            current_date = data_date(order.data)
             signal_date = self._order_signal_dates.pop(order.ref, None)
+            current_date = signal_date or bt.num2date(order.executed.dt).date()
             symbol = str(order.data._name)
             quantity = decimal(abs(order.executed.size), "0.0001")
             price = decimal(order.executed.price, "0.0001")
@@ -287,7 +296,7 @@ def instrument_strategy(strategy_cls, portfolio):
                     "reject_reason": None,
                 }
             )
-            self._record_snapshot(force=True)
+            self._record_snapshot(force=True, snapshot_date=current_date)
 
         def stop(self):
             super_stop = getattr(super(), "stop", None)
@@ -337,6 +346,8 @@ def instrument_strategy(strategy_cls, portfolio):
                 )
 
         def next(self):
+            if report_date and strategy_date(self) > report_date:
+                return
             user_next = getattr(super(), "next", None)
             if callable(user_next):
                 user_next()
@@ -396,10 +407,10 @@ def instrument_strategy(strategy_cls, portfolio):
                 }
             )
 
-        def _record_snapshot(self, force=False):
+        def _record_snapshot(self, force=False, snapshot_date=None):
             if not self.datas:
                 return
-            current_date = strategy_date(self)
+            current_date = snapshot_date or strategy_date(self)
             if self._last_snapshot_date == current_date and not force:
                 return
             if force:
