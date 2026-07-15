@@ -21,7 +21,10 @@ class MarketDataSyncService:
         self.db = db
 
     def sync_running_portfolio_bars(self, end_date: date, retry_on_rate_limit: bool = True) -> dict:
-        items = self._running_portfolio_items()
+        items = [
+            MarketDataSyncItem(instrument=item.instrument, start_date=end_date)
+            for item in self._running_portfolio_items()
+        ]
         return self._sync_items(items, end_date, retry_on_rate_limit)
 
     def sync_portfolio_bars(self, portfolio_id: int, end_date: date, retry_on_rate_limit: bool = True) -> dict:
