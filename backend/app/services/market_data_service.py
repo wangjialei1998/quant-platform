@@ -141,7 +141,7 @@ class MarketDataService:
             except Exception as exc:
                 if not retry_on_rate_limit or not _is_rate_limit_error(exc):
                     raise
-                delay = random.randint(60, 120)
+                delay = random.randint(30, 60)
                 logger.warning(
                     "TickFlow rate limit when syncing %s from %s to %s; retry after %s seconds",
                     instrument.symbol,
