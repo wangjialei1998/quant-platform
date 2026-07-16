@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -22,7 +22,7 @@ class MarketDataSyncService:
 
     def sync_running_portfolio_bars(self, end_date: date, retry_on_rate_limit: bool = True) -> dict:
         items = [
-            MarketDataSyncItem(instrument=item.instrument, start_date=end_date)
+            MarketDataSyncItem(instrument=item.instrument, start_date=end_date - timedelta(days=1))
             for item in self._running_portfolio_items()
         ]
         return self._sync_items(items, end_date, retry_on_rate_limit)
