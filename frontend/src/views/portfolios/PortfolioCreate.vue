@@ -50,12 +50,16 @@ async function addInstrument() {
   const symbol = instrumentForm.symbol.trim()
   if (!symbol) return
   const instrument = await createInstrument({ symbol })
+	if(instrument.name==instrument.symbol){
+		ElMessage.error("输入的标的<"+instrument.name+">不存在！")
+		return
+		}
   if (!form.instrument_ids.includes(instrument.id)) {
     form.instrument_ids.push(instrument.id)
   }
   selectorKey.value += 1
   instrumentForm.symbol = ''
-  ElMessage.success('标的已添加')
+  ElMessage.success('标的<'+instrument.symbol+' '+instrument.name+'>已添加')
 }
 
 onMounted(async () => {
