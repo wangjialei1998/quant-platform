@@ -140,8 +140,9 @@ class MarketDataService:
                 return self.tickflow_client.fetch_daily_bars(instrument.symbol, start_date, end_date)
             except Exception as exc:
                 if not retry_on_rate_limit or not _is_rate_limit_error(exc):
-                    raise
-                delay = random.randint(30, 60)
+                    # raise
+                    logger.warning("从tickflow 获取数据失败，非限流错误，symbol: %s, start_date: %s, end_date: %s, error: %s", instrument.symbol, start_date, end_date, exc)
+                delay = random.randint(15, 30)
                 logger.warning(
                     "TickFlow rate limit when syncing %s from %s to %s; retry after %s seconds",
                     instrument.symbol,
