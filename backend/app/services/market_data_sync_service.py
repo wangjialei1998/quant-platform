@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -21,11 +21,11 @@ class MarketDataSyncService:
         self.db = db
 
     def sync_running_portfolio_bars(self, end_date: date, retry_on_rate_limit: bool = True) -> dict:
-        items = [
-            MarketDataSyncItem(instrument=item.instrument, start_date=end_date - timedelta(days=1))
-            for item in self._running_portfolio_items()
-        ]
-        return self._sync_items(items, end_date, retry_on_rate_limit)
+        return self._sync_quotes(
+            [item.instrument for item in self._running_portfolio_items()],
+            end_date,
+            retry_on_rate_limit,
+        )
 
     def sync_portfolio_bars(self, portfolio_id: int, end_date: date, retry_on_rate_limit: bool = True) -> dict:
         portfolio = self.db.get(Portfolio, portfolio_id)
@@ -105,5 +105,28 @@ class MarketDataSyncService:
             "status": "success",
             "end_date": end_date.isoformat(),
             "instrument_count": len(items),
+            "items": results,
+        }
+
+    def _sync_quotes(
+        self,
+        instruments: list[Instrument],
+        trade_date: date,
+        retry_on_error: bool,
+    ) -> dict:
+        service = MarketDataService(self.db)
+        results: list[dict] = []
+        for instrument in instruments:
+            result = service.sync_daily_quotes(
+                [instrument],
+                trade_date,
+                retry_on_error=retry_on_error,
+            )
+            self.db.commit()
+            results.extend(result.get("items", []))
+        return {
+            "status": "success",
+            "end_date": trade_date.isoformat(),
+            "instrument_count": len(instruments),
             "items": results,
         }

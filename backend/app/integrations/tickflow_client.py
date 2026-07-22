@@ -54,6 +54,24 @@ class TickFlowClient:
         bars.sort(key=lambda item: item["trade_date"])
         return bars
 
+    def fetch_daily_quote(self, symbol: str, trade_date: date) -> dict | None:
+        client = self._client()
+        normalized_symbol = normalize_symbol(symbol)
+        try:
+            response = client.quotes.get(symbols=[normalized_symbol])
+        except Exception as exc:
+            raise RuntimeError(f"TickFlow quote fetch failed for {normalized_symbol}: {exc}") from exc
+
+        rows = _iter_rows(response.get("data")) if isinstance(response, dict) else _iter_rows(response)
+        for row in rows:
+            row_symbol = _first_value(row, "symbol") if isinstance(row, dict) else getattr(row, "symbol", None)
+            if row_symbol and normalize_symbol(str(row_symbol)) != normalized_symbol:
+                continue
+            parsed = _parse_quote(row, trade_date)
+            if parsed:
+                return parsed
+        return None
+
     def _client(self) -> Any:
         try:
             from tickflow import TickFlow
@@ -168,6 +186,37 @@ def _parse_bar(row: Any) -> dict | None:
         "limit_up": _decimal_value(_first_value(row, "limit_up", "up_limit")),
         "limit_down": _decimal_value(_first_value(row, "limit_down", "down_limit")),
         "is_suspended": bool(_first_value(row, "is_suspended", "suspended") or False),
+    }
+
+
+def _parse_quote(row: Any, trade_date: date) -> dict | None:
+    if hasattr(row, "_asdict"):
+        row = row._asdict()
+    if not isinstance(row, dict):
+        row = {
+            key: getattr(row, key)
+            for key in dir(row)
+            if not key.startswith("_") and not callable(getattr(row, key))
+        }
+
+    open_price = _decimal_value(_first_value(row, "open"))
+    high = _decimal_value(_first_value(row, "high"))
+    low = _decimal_value(_first_value(row, "low"))
+    close = _decimal_value(_first_value(row, "last_price"))
+    if open_price is None or high is None or low is None or close is None:
+        return None
+
+    return {
+        "trade_date": trade_date,
+        "open": open_price,
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": _decimal_value(_first_value(row, "volume")),
+        "amount": _decimal_value(_first_value(row, "amount")),
+        "limit_up": None,
+        "limit_down": None,
+        "is_suspended": False,
     }
 
 

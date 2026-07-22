@@ -128,6 +128,54 @@ class MarketDataService:
         self.db.flush()
         return {"status": "success", "items": synced}
 
+    def sync_daily_quotes(
+        self,
+        instruments: list[Instrument],
+        trade_date: date,
+        adjustment_type: str = "none",
+        retry_on_error: bool = False,
+    ) -> dict:
+        synced: list[dict] = []
+        for instrument in instruments:
+            quote = self._fetch_daily_quote(instrument, trade_date, retry_on_error)
+            saved = self._upsert_bars(instrument, [quote], adjustment_type)
+            synced.append(
+                {
+                    "instrument_id": instrument.id,
+                    "symbol": instrument.symbol,
+                    "fetched": 1,
+                    "saved": saved,
+                }
+            )
+        self.db.flush()
+        return {"status": "success", "items": synced}
+
+    def _fetch_daily_quote(
+        self,
+        instrument: Instrument,
+        trade_date: date,
+        retry_on_error: bool,
+    ) -> dict:
+        while True:
+            try:
+                quote = self.tickflow_client.fetch_daily_quote(instrument.symbol, trade_date)
+                if quote is None:
+                    raise RuntimeError(f"No quote returned for {instrument.symbol} from TickFlow")
+                return quote
+            except Exception as exc:
+                if not retry_on_error:
+                    # raise
+                    logger.warning("从tickflow quote 获取数据失败，非限流错误，symbol: %s, error: %s", instrument.symbol,  exc)
+                delay = random.randint(15, 30)
+                logger.warning(
+                    "TickFlow quote fetch failed for %s on %s; retry after %s seconds: %s",
+                    instrument.symbol,
+                    trade_date,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+
     def _fetch_daily_bars(
         self,
         instrument: Instrument,
@@ -141,7 +189,7 @@ class MarketDataService:
             except Exception as exc:
                 if not retry_on_rate_limit or not _is_rate_limit_error(exc):
                     # raise
-                    logger.warning("从tickflow 获取数据失败，非限流错误，symbol: %s, start_date: %s, end_date: %s, error: %s", instrument.symbol, start_date, end_date, exc)
+                    logger.warning("从tickflow klines 获取数据失败，非限流错误，symbol: %s, start_date: %s, end_date: %s, error: %s", instrument.symbol, start_date, end_date, exc)
                 delay = random.randint(15, 30)
                 logger.warning(
                     "TickFlow rate limit when syncing %s from %s to %s; retry after %s seconds",
